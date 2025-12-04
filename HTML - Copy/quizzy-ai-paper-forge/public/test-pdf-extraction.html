@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test PDF Extraction</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-box {
+            border: 2px solid #007bff;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #result {
+            background: #f8f9fa;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>🧪 PDF Extraction Test</h1>
+    
+    <div class="test-box">
+        <h2>Test Real PDF Extraction</h2>
+        <p>Upload a PDF file to test if the extraction is working:</p>
+        <input type="file" id="pdfFile" accept=".pdf" />
+        <button onclick="testExtraction()">Test Extraction</button>
+    </div>
+    
+    <div id="result"></div>
+
+    <script type="module">
+        import { extractRealPDFContent } from '/src/lib/pdf-extractor-real.ts';
+        
+        window.testExtraction = async function() {
+            const fileInput = document.getElementById('pdfFile');
+            const resultDiv = document.getElementById('result');
+            
+            if (!fileInput.files || !fileInput.files[0]) {
+                resultDiv.innerHTML = '<span class="error">❌ Please select a PDF file first!</span>';
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            resultDiv.innerHTML = '<span>⏳ Extracting PDF content...</span>';
+            
+            try {
+                console.log('Starting PDF extraction test...');
+                const result = await extractRealPDFContent(file);
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `
+                        <span class="success">✅ EXTRACTION SUCCESSFUL!</span>
+                        
+                        <strong>File:</strong> ${file.name}
+                        <strong>Pages:</strong> ${result.numPages}
+                        <strong>Characters Extracted:</strong> ${result.text.length}
+                        
+                        <strong>Content Preview (first 500 characters):</strong>
+                        ${result.text.substring(0, 500)}...
+                        
+                        <strong>Full Content:</strong>
+                        ${result.text}
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <span class="error">❌ EXTRACTION FAILED</span>
+                        
+                        <strong>Error:</strong> ${result.error || 'Unknown error'}
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <span class="error">❌ ERROR</span>
+                    
+                    ${error.message}
+                `;
+                console.error('Test failed:', error);
+            }
+        };
+    </script>
+</body>
+</html>

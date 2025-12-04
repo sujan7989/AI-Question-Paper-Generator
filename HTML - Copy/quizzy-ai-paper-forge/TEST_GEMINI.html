@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Gemini API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #357ae8;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        h1 {
+            color: #333;
+        }
+        .api-key {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Gemini API Test</h1>
+        <p>This page tests if your Gemini API key works correctly.</p>
+        
+        <div class="api-key">
+            <strong>API Key:</strong> AIzaSyBpejf1OkN80FDwmq42Rv80XurIQmtfcTA
+        </div>
+
+        <button onclick="testSimple()">Test 1: Simple Request</button>
+        <button onclick="testWithContent()">Test 2: With Content</button>
+        <button onclick="testLargeContent()">Test 3: Large Content</button>
+        <button onclick="clearResults()">Clear Results</button>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_KEY = 'AIzaSyBpejf1OkN80FDwmq42Rv80XurIQmtfcTA';
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${API_KEY}`;
+
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testSimple() {
+            addResult('🧪 Test 1: Testing simple request...', 'info');
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: 'Say "Hello, Gemini is working!"'
+                            }]
+                        }]
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = data.candidates[0].content.parts[0].text;
+                    addResult(`✅ SUCCESS!\n\nGemini Response:\n${text}`, 'success');
+                } else {
+                    const errorText = await response.text();
+                    addResult(`❌ FAILED!\n\nStatus: ${response.status}\nError: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ NETWORK ERROR!\n\n${error.message}\n\nThis might be:\n- Internet connection issue\n- Firewall blocking the request\n- CORS issue (shouldn't happen with Gemini)`, 'error');
+            }
+        }
+
+        async function testWithContent() {
+            addResult('🧪 Test 2: Testing with sample content...', 'info');
+            
+            const sampleContent = `
+ETHICAL HACKING - STUDY MATERIAL
+
+Chapter 1: Introduction to Ethical Hacking
+Ethical hacking is the practice of testing computer systems and networks to find security vulnerabilities.
+
+Key Concepts:
+- Penetration Testing: Simulating attacks to find weaknesses
+- Reconnaissance: Gathering information about target systems
+- Vulnerability Assessment: Identifying security flaws
+
+Tools:
+- Nmap: Network scanning tool
+- Metasploit: Exploitation framework
+- Wireshark: Network protocol analyzer
+            `.trim();
+
+            const prompt = `You are an expert university professor. Create 3 short questions based on this content:
+
+${sampleContent}
+
+Format:
+1. [Question 1]
+2. [Question 2]
+3. [Question 3]`;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: prompt
+                            }]
+                        }]
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = data.candidates[0].content.parts[0].text;
+                    addResult(`✅ SUCCESS!\n\nGenerated Questions:\n${text}`, 'success');
+                } else {
+                    const errorText = await response.text();
+                    addResult(`❌ FAILED!\n\nStatus: ${response.status}\nError: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ ERROR!\n\n${error.message}`, 'error');
+            }
+        }
+
+        async function testLargeContent() {
+            addResult('🧪 Test 3: Testing with large content (12000 chars)...', 'info');
+            
+            // Generate large content
+            const largeContent = `
+COMPREHENSIVE STUDY MATERIAL ON CYBERSECURITY
+
+${'Chapter on Network Security\n'.repeat(100)}
+${'Detailed explanation of security concepts and practices.\n'.repeat(100)}
+${'Technical details about implementation and best practices.\n'.repeat(50)}
+            `.substring(0, 12000);
+
+            const prompt = `Create a question paper based on this content:\n\n${largeContent}`;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: prompt
+                            }]
+                        }]
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = data.candidates[0].content.parts[0].text;
+                    addResult(`✅ SUCCESS!\n\nContent length: ${largeContent.length} chars\nResponse length: ${text.length} chars\n\nFirst 500 chars:\n${text.substring(0, 500)}...`, 'success');
+                } else {
+                    const errorText = await response.text();
+                    addResult(`❌ FAILED!\n\nStatus: ${response.status}\nError: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ ERROR!\n\n${error.message}`, 'error');
+            }
+        }
+
+        // Auto-run simple test on page load
+        window.addEventListener('load', () => {
+            addResult('📋 Ready to test! Click a button above to start.', 'info');
+        });
+    </script>
+</body>
+</html>
