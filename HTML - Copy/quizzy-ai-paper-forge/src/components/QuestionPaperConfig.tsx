@@ -29,6 +29,7 @@ interface Part {
   questions: number;
   marksPerQuestion: number;
   choicesEnabled: boolean;
+  difficulty: 'easy' | 'medium' | 'hard';
 }
 
 // Using Subject interface from subject-manager
@@ -47,12 +48,12 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [totalMarks, setTotalMarks] = useState(100);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [apiProvider, setApiProvider] = useState<ApiProvider>('openrouter'); // Using OpenRouter with Claude 3.5 Haiku (BEST!)
+  const [apiProvider, setApiProvider] = useState<ApiProvider>('openrouter'); // OpenRouter with Claude - should work now!
   const [totalQuestions, setTotalQuestions] = useState<number>(10);
   const [parts, setParts] = useState<Part[]>([
-    { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false },
-    { name: 'Part B', marks: 30, questions: 6, marksPerQuestion: 5, choicesEnabled: true },
-    { name: 'Part C', marks: 50, questions: 4, marksPerQuestion: 12.5, choicesEnabled: true },
+    { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy' },
+    { name: 'Part B', marks: 30, questions: 6, marksPerQuestion: 5, choicesEnabled: true, difficulty: 'medium' },
+    { name: 'Part C', marks: 50, questions: 4, marksPerQuestion: 12.5, choicesEnabled: true, difficulty: 'hard' },
   ]);
   const [unitWeightage, setUnitWeightage] = useState<{ [unit: string]: number }>({});
   const [selectedTopics, setSelectedTopics] = useState<{ [unitId: string]: string[] }>({});
@@ -80,7 +81,8 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       marks: 10,
       questions: 5,
       marksPerQuestion: 2,
-      choicesEnabled: false
+      choicesEnabled: false,
+      difficulty: 'medium'
     }]);
   };
 
@@ -172,7 +174,18 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   };
 
   const getTotalQuestions = () => {
-    return totalQuestions;
+    // Calculate total from all parts
+    // If choices enabled, we need to generate more questions
+    return parts.reduce((sum, part) => {
+      const requiredQuestions = part.questions;
+      const actualQuestions = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
+      return sum + actualQuestions;
+    }, 0);
+  };
+
+  const getRequiredQuestions = () => {
+    // Calculate how many questions student must answer (for display)
+    return parts.reduce((sum, part) => sum + part.questions, 0);
   };
 
   const validateConfiguration = () => {
@@ -402,33 +415,39 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       }
 
       console.log('═══════════════════════════════════════════════');
-      console.log('📚 FINAL CONTENT SUMMARY');
+      console.log('📚 GENERATING PROPER PROMPT WITH PARTS CONFIG');
       console.log('═══════════════════════════════════════════════');
-      console.log(`📊 Total content length: ${combinedContent.length} characters`);
-      console.log(`📄 Number of units processed: ${relevantUnits.length}`);
+      console.log(`📊 Total questions needed: ${getTotalQuestions()}`);
+      console.log(`📋 Parts configuration:`, parts);
       console.log(`🤖 API provider: ${apiProvider}`);
-      console.log(`📖 Content preview (first 500 chars):`);
-      console.log(combinedContent.substring(0, 500));
       console.log('═══════════════════════════════════════════════');
 
-      // Create prompt for AI
-      const prompt = `Subject: ${selectedSubject.subject_name}
-Total Marks: ${totalMarks}
-Content: ${combinedContent}`;
+      // Use the proper prompt generator from subject-manager
+      const { generatePromptFromSubjectUnits } = await import('@/lib/subject-manager');
+      const prompt = await generatePromptFromSubjectUnits(
+        selectedSubject,
+        selectedUnits,
+        unitWeightages,
+        questionConfig
+      );
 
-      console.log('🚀 Sending prompt to AI...');
+      console.log('🚀 Generated proper prompt with parts configuration');
       console.log(`📝 Prompt length: ${prompt.length} characters`);
-      console.log(`📖 Prompt preview (first 300 chars):`);
-      console.log(prompt.substring(0, 300));
+      console.log(`📖 Prompt preview (first 800 chars):`);
+      console.log(prompt.substring(0, 800));
+      console.log('═══════════════════════════════════════════════');
 
       const { generateQuestions } = await import('@/lib/ai');
       const generatedQuestions = await generateQuestions(apiProvider, prompt);
       
       console.log('✅ DEBUG: Questions generated successfully');
       console.log('📋 DEBUG: Generated questions length:', generatedQuestions.length);
+      console.log('📖 DEBUG: Generated questions preview (first 1000 chars):');
+      console.log(generatedQuestions.substring(0, 1000));
       const subjectName = selectedSubject.subject_name;
 
       if (!generatedQuestions || generatedQuestions.trim() === '') {
+        console.error('❌ AI returned empty response');
         throw new Error("The AI failed to generate questions. Please try a different provider or adjust your settings.");
       }
       
@@ -444,6 +463,7 @@ Content: ${combinedContent}`;
         examMonth: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase(),
         dateSession: new Date().toLocaleDateString('en-GB'),
         useKalasalingamFormat: true, // Enable Kalasalingam format
+        parts: parts, // Pass user-configured parts
         courseOutcomes: [
           { co: 'CO2', description: 'Analyze the optimal usage of concepts from the study material' },
           { co: 'CO3', description: 'Demonstrate the usage of principles for specific requirements' },
@@ -873,15 +893,21 @@ ${paper.content}`;
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openrouter">🤖 Claude 3.5 Haiku - BEST for PDF Content ⭐</SelectItem>
+                      <SelectItem value="openrouter">🤖 OpenRouter - Claude + Free Models (RECOMMENDED)</SelectItem>
+                      <SelectItem value="anthropic">⭐ Anthropic Claude Direct (CORS Issues)</SelectItem>
                       <SelectItem value="local">💻 Local Generation (Fallback)</SelectItem>
-                      <SelectItem value="gemini">🧠 Google Gemini (API Issues)</SelectItem>
+                      <SelectItem value="gemini">🧠 Google Gemini (Backup)</SelectItem>
                       <SelectItem value="nvidia">🚀 NVIDIA (CORS Issues)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {apiProvider === 'anthropic' && (
+                    <p className="text-xs text-red-600">
+                      ⚠️ Anthropic Direct API has CORS issues from browser. Use OpenRouter instead (it proxies Claude for you)!
+                    </p>
+                  )}
                   {apiProvider === 'openrouter' && (
-                    <p className="text-xs text-green-600">
-                      ✅ Claude 3.5 Haiku: Powerful, accurate, works from browser, and BEST for analyzing PDF content and generating highly relevant questions!
+                    <p className="text-xs text-blue-600">
+                      ℹ️ Will try FREE models first, then Claude. Add payment method at openrouter.ai/settings/billing to use your $100 credits with Claude.
                     </p>
                   )}
                   {apiProvider === 'nvidia' && (
@@ -895,8 +921,8 @@ ${paper.content}`;
                     </p>
                   )}
                   {apiProvider === 'local' && (
-                    <p className="text-xs text-orange-600">
-                      ⚠️ Local generation provides basic questions. Use Claude 3.5 Haiku for best results with your PDF content.
+                    <p className="text-xs text-green-600">
+                      ✅ Local generation extracts actual terms from your PDF and generates relevant questions. For AI-powered generation, try OpenRouter.
                     </p>
                   )}
                 </div>
@@ -991,7 +1017,7 @@ ${paper.content}`;
                     )}
                   </div>
                   
-                  <div className="grid gap-4 md:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-5">
                     <div className="space-y-2">
                       <Label>Total Marks</Label>
                       <Input
@@ -1017,6 +1043,19 @@ ${paper.content}`;
                       <div className="px-3 py-2 bg-muted rounded-md text-sm">
                         {part.marksPerQuestion.toFixed(1)}
                       </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Difficulty Level</Label>
+                      <select
+                        value={part.difficulty}
+                        onChange={(e) => updatePart(index, 'difficulty', e.target.value as 'easy' | 'medium' | 'hard')}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
                     </div>
                     
                     <div className="space-y-2">
@@ -1121,7 +1160,9 @@ ${paper.content}`;
                 
                 <div className="flex justify-between">
                   <span className="text-sm font-medium">AI Questions:</span>
-                  <span className="text-sm text-muted-foreground">{getTotalQuestions()}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {getTotalQuestions()} total ({getRequiredQuestions()} required)
+                  </span>
                 </div>
                 
                 <div className="flex justify-between">

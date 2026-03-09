@@ -1,8 +1,7 @@
 // Direct Solution for PDF-based Question Generation
 
-// OpenRouter (Claude 3.5 Haiku) is the best option for PDF-based question generation
-// Works from browser with no CORS issues
-export type ApiProvider = 'local' | 'gemini' | 'nvidia' | 'openrouter';
+// Multiple AI providers supported for maximum flexibility
+export type ApiProvider = 'local' | 'gemini' | 'nvidia' | 'openrouter' | 'anthropic';
 
 /**
  * NEW: Generate questions directly from PDF files (no text extraction needed)
@@ -63,52 +62,39 @@ export async function generateQuestions(provider: ApiProvider, prompt: string): 
   console.log('🤖 AI QUESTION GENERATION STARTED');
   console.log('═══════════════════════════════════════════════');
   console.log('📖 Using extracted PDF content for question generation');
+  console.log('📝 Full prompt length:', prompt.length);
   
-  const subjectMatch = prompt.match(/Subject:\s*([^\n]+)/);
-  const subjectName = subjectMatch ? subjectMatch[1] : 'PDF Content';
-  
-  const marksMatch = prompt.match(/Total Marks:\s*(\d+)/);
-  const totalMarks = marksMatch ? marksMatch[1] : '100';
-  
-  // Extract the actual PDF content
-  const contentMatch = prompt.match(/Content:\s*([\s\S]*)/);
-  const pdfContent = contentMatch ? contentMatch[1].trim() : '';
-  
-  console.log(`📚 Subject: ${subjectName}`);
-  console.log(`💯 Total Marks: ${totalMarks}`);
-  console.log(`📄 PDF Content Length: ${pdfContent.length} characters`);
-  console.log(`📝 Content preview (first 300 chars):`);
-  console.log(pdfContent.substring(0, 300));
-  console.log('═══════════════════════════════════════════════');
-  
-  // If no content, throw error with helpful message
-  if (pdfContent.length < 100) {
-    console.error('🚨 NO PDF CONTENT FOUND');
-    console.error('This means PDFs were not uploaded or extracted during subject creation.');
-    console.error('Please go to Subject Setup and create a subject with PDF uploads.');
-    throw new Error('NO_PDF_CONTENT: No extracted content found. Please upload PDFs in Subject Setup.');
-  }
-  
-  console.log('✅ PDF content found, sending to AI...');
+  // Simply pass the FULL prompt to the AI provider - don't modify it!
+  console.log('✅ Passing complete prompt to AI provider');
   console.log(`🚀 Using provider: ${provider}`);
   
   switch (provider) {
+    case 'anthropic':
+      console.log('🚀 Using Anthropic Claude API (BEST for PDF content!)');
+      return await generateWithAnthropicAIFullPrompt(prompt);
     case 'openrouter':
-      console.log('🚀 Using OpenRouter API (Claude 3.5 Haiku - BEST!)');
-      return await generateWithOpenRouterAI(pdfContent, subjectName, totalMarks);
+      console.log('🚀 Using OpenRouter API (Multiple models)');
+      return await generateWithOpenRouterAIFullPrompt(prompt);
     case 'nvidia':
       console.log('🚀 Attempting NVIDIA API (Phi-4 Mini)...');
       console.warn('⚠️ Note: NVIDIA API has CORS restrictions from browser');
-      return await generateWithNvidiaAI(pdfContent, subjectName, totalMarks);
+      return await generateWithNvidiaAIFullPrompt(prompt);
     case 'gemini':
       console.log('🚀 Using Gemini API (Gemini Pro)');
-      return await generateWithGeminiAI(pdfContent, subjectName, totalMarks);
+      return await generateWithGeminiAIFullPrompt(prompt);
     case 'local':
       console.log('🚀 Using Local Generation (Fallback)');
-      return generateQuestionsFromPDFContent(pdfContent, subjectName, totalMarks);
+      // Extract content for local generation
+      const contentMatch = prompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+      const content = contentMatch ? contentMatch[1].trim() : prompt;
+      const subjectMatch = prompt.match(/SUBJECT:\s*([^\n]+)/);
+      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+      const marksMatch = prompt.match(/TOTAL MARKS:\s*(\d+)/);
+      const totalMarks = marksMatch ? marksMatch[1] : '100';
+      return generateQuestionsFromPDFContent(content, subject, totalMarks);
     default:
       console.log('🚀 Using OpenRouter API (default - BEST for PDF content)');
-      return await generateWithOpenRouterAI(pdfContent, subjectName, totalMarks);
+      return await generateWithOpenRouterAIFullPrompt(prompt);
   }
 }
 
@@ -117,65 +103,169 @@ function generateQuestionsFromPDFContent(content: string, subject: string, total
   console.log('🔍 LOCAL GENERATION: Analyzing PDF content...');
   console.log('═══════════════════════════════════════════════');
   console.log('📄 Content length:', content.length);
-  console.log('📄 Content sample:', content.substring(0, 300));
+  console.log('📄 Content sample:', content.substring(0, 500));
   
-  // Extract meaningful content from the PDF
-  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 15);
-  const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 50);
+  // Extract the parts configuration from the prompt
+  const partsMatch = content.match(/PARTS CONFIGURATION:([\s\S]*?)CONTENT TO USE FOR QUESTIONS:/);
+  let totalQuestions = 10; // default
+  let parts: Array<{name: string, questions: number, marks: number}> = [];
   
-  // Extract key terms and concepts - MORE AGGRESSIVE
-  const technicalTerms = content.match(/\b[A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,3}\b/g) || [];
+  if (partsMatch) {
+    const partsText = partsMatch[1];
+    const partLines = partsText.split('\n').filter(l => l.includes('questions'));
+    
+    partLines.forEach(line => {
+      const match = line.match(/(\w+\s+\w+)\s+-\s+(\d+)\s+questions\s+×\s+(\d+)\s+marks\s+=\s+(\d+)\s+marks/);
+      if (match) {
+        parts.push({
+          name: match[1],
+          questions: parseInt(match[2]),
+          marks: parseInt(match[4])
+        });
+      }
+    });
+    
+    totalQuestions = parts.reduce((sum, p) => sum + p.questions, 0);
+    console.log('📋 Detected parts configuration:', parts);
+    console.log('📊 Total questions to generate:', totalQuestions);
+  }
+  
+  // Extract ACTUAL content from PDF (not the prompt structure)
+  const contentMatch = content.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:|$)/);
+  const actualPDFContent = contentMatch ? contentMatch[1].trim() : content;
+  
+  console.log('📖 Extracted PDF content length:', actualPDFContent.length);
+  console.log('📖 PDF content preview:', actualPDFContent.substring(0, 500));
+  
+  // Extract meaningful content from the ACTUAL PDF
+  const sentences = actualPDFContent.split(/[.!?]+/).filter(s => s.trim().length > 20);
+  const paragraphs = actualPDFContent.split(/\n\s*\n/).filter(p => p.trim().length > 50);
+  
+  // Extract technical terms (capitalized words and phrases)
+  const technicalTerms = actualPDFContent.match(/\b[A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,3}\b/g) || [];
+  
+  // Extract lowercase technical terms (common in ML: neural network, machine learning, etc.)
+  const lowercaseTerms = actualPDFContent.match(/\b(?:machine learning|neural network|deep learning|algorithm|model|training|testing|validation|classification|regression|clustering|supervised|unsupervised|reinforcement|feature|dataset|accuracy|precision|recall|overfitting|underfitting|gradient descent|backpropagation|activation function|loss function|optimizer|epoch|batch|layer|neuron|weight|bias|dropout|regularization|cross-validation|hyperparameter)\b/gi) || [];
+  
+  // Combine all terms
+  const allTerms = [...technicalTerms, ...lowercaseTerms];
+  const keyTerms = [...new Set(allTerms)]
+    .filter(term => term.length > 3 && term.length < 60)
+    .slice(0, 100);
+  
+  // Extract definitions and explanations
   const definitions = sentences.filter(s => 
-    s.includes('is defined as') || 
-    s.includes('refers to') || 
-    s.includes('means') ||
-    s.includes('is a') ||
-    s.includes('are') ||
-    s.includes('consists of') ||
-    s.includes('involves')
+    s.toLowerCase().includes('is defined as') || 
+    s.toLowerCase().includes('refers to') || 
+    s.toLowerCase().includes('means') ||
+    s.toLowerCase().includes('is a type of') ||
+    s.toLowerCase().includes('is used for') ||
+    s.toLowerCase().includes('consists of') ||
+    s.toLowerCase().includes('involves')
   );
   
-  // Get important concepts
-  const keyTerms = [...new Set(technicalTerms)]
-    .filter(term => term.length > 3 && term.length < 50)
-    .slice(0, 30);
-  
-  // Extract specific sentences that look like important facts
+  // Extract important sentences with specific information
   const importantSentences = sentences.filter(s => 
-    s.length > 30 && s.length < 200 &&
-    (s.includes('is') || s.includes('are') || s.includes('can') || s.includes('will'))
-  ).slice(0, 20);
+    s.length > 30 && s.length < 300 &&
+    (s.toLowerCase().includes('algorithm') || 
+     s.toLowerCase().includes('method') || 
+     s.toLowerCase().includes('technique') ||
+     s.toLowerCase().includes('process') ||
+     s.toLowerCase().includes('approach') ||
+     s.toLowerCase().includes('model') ||
+     s.toLowerCase().includes('system'))
+  ).slice(0, 50);
   
-  console.log('📝 Key terms extracted:', keyTerms.length, '-', keyTerms.slice(0, 10).join(', '));
+  console.log('📝 Key terms extracted:', keyTerms.length, '-', keyTerms.slice(0, 15).join(', '));
   console.log('📖 Definitions found:', definitions.length);
   console.log('📄 Paragraphs found:', paragraphs.length);
   console.log('💡 Important sentences:', importantSentences.length);
   
-  // Generate questions based on actual PDF content - MORE SPECIFIC
-  const shortQuestions = generateShortQuestionsFromActualContent(content, keyTerms, definitions, importantSentences);
-  const mediumQuestions = generateMediumQuestionsFromActualContent(content, paragraphs, keyTerms);
-  const longQuestions = generateLongQuestionsFromActualContent(content, keyTerms);
+  // Generate questions for each part using ACTUAL content
+  let allQuestions: string[] = [];
+  let questionNumber = 1;
   
-  console.log('✅ Generated questions from PDF content');
-  console.log('   - Short questions:', shortQuestions.length);
-  console.log('   - Medium questions:', mediumQuestions.length);
-  console.log('   - Long questions:', longQuestions.length);
+  parts.forEach(part => {
+    console.log(`\n📝 Generating ${part.questions} questions for ${part.name}...`);
+    
+    for (let i = 0; i < part.questions; i++) {
+      const termIndex = (questionNumber - 1) % Math.max(keyTerms.length, 1);
+      const term = keyTerms[termIndex] || 'the concept';
+      
+      // Get relevant sentence for this term
+      const relevantSentence = importantSentences.find(s => 
+        s.toLowerCase().includes(term.toLowerCase())
+      );
+      
+      let question = '';
+      const marksPerQ = Math.round(part.marks / part.questions);
+      
+      if (part.name.includes('A')) {
+        // Short questions - Use ACTUAL terms from PDF
+        if (definitions.length > i) {
+          // Extract the subject of the definition
+          const defSentence = definitions[i];
+          const defTerm = defSentence.split(/is defined as|refers to|means|is a type of|is used for/i)[0].trim();
+          question = `Q${questionNumber}. What is ${defTerm}? | Remember | ${marksPerQ}`;
+        } else if (keyTerms.length > i) {
+          const specificTerm = keyTerms[i];
+          const questionTypes = [
+            `Q${questionNumber}. Define ${specificTerm} | Remember | ${marksPerQ}`,
+            `Q${questionNumber}. What is ${specificTerm}? | Remember | ${marksPerQ}`,
+            `Q${questionNumber}. Explain ${specificTerm} | Understand | ${marksPerQ}`,
+            `Q${questionNumber}. List the key features of ${specificTerm} | Remember | ${marksPerQ}`,
+            `Q${questionNumber}. Describe ${specificTerm} | Understand | ${marksPerQ}`
+          ];
+          question = questionTypes[i % questionTypes.length];
+        } else {
+          question = `Q${questionNumber}. Define ${term} | Remember | ${marksPerQ}`;
+        }
+      } else if (part.name.includes('B')) {
+        // Medium questions - Use ACTUAL content
+        if (keyTerms.length > i * 2) {
+          const term1 = keyTerms[i * 2] || term;
+          const term2 = keyTerms[i * 2 + 1] || term;
+          const questionTypes = [
+            `Q${questionNumber}. Explain how ${term1} works in detail | Understand | ${marksPerQ}`,
+            `Q${questionNumber}. Compare ${term1} and ${term2} | Analyze | ${marksPerQ}`,
+            `Q${questionNumber}. Describe the applications of ${term1} | Apply | ${marksPerQ}`,
+            `Q${questionNumber}. Analyze the advantages and disadvantages of ${term1} | Analyze | ${marksPerQ}`,
+            `Q${questionNumber}. Discuss the role of ${term1} in ${subject} | Understand | ${marksPerQ}`
+          ];
+          question = questionTypes[i % questionTypes.length];
+        } else {
+          question = `Q${questionNumber}. Explain ${term} in detail | Understand | ${marksPerQ}`;
+        }
+      } else {
+        // Long questions - Use ACTUAL topics from PDF
+        if (paragraphs.length > i) {
+          // Extract main topic from paragraph
+          const para = paragraphs[i];
+          const paraTerms = keyTerms.filter(t => para.toLowerCase().includes(t.toLowerCase()));
+          const mainTopic = paraTerms[0] || term;
+          
+          const questionTypes = [
+            `Q${questionNumber}. Explain ${mainTopic} with suitable examples and diagrams | Understand | ${marksPerQ}`,
+            `Q${questionNumber}. Discuss ${mainTopic} in detail with its applications | Apply | ${marksPerQ}`,
+            `Q${questionNumber}. Describe ${mainTopic} and analyze its significance | Analyze | ${marksPerQ}`,
+            `Q${questionNumber}. Explain the working of ${mainTopic} with examples | Understand | ${marksPerQ}`
+          ];
+          question = questionTypes[i % questionTypes.length];
+        } else {
+          question = `Q${questionNumber}. Explain ${term} comprehensively with examples | Understand | ${marksPerQ}`;
+        }
+      }
+      
+      allQuestions.push(question);
+      questionNumber++;
+    }
+  });
+  
+  console.log(`✅ Generated ${allQuestions.length} questions from PDF content`);
+  console.log('📋 Sample questions:', allQuestions.slice(0, 3).join('\n'));
   console.log('═══════════════════════════════════════════════');
   
-  return `${subject}
-Total Marks: ${totalMarks}
-
-PART A - Short Answer Questions (20 Marks)
-
-${shortQuestions.map((q, i) => `${i + 1}. ${q} (4 marks)`).join('\n\n')}
-
-PART B - Medium Answer Questions (30 Marks)
-
-${mediumQuestions.map((q, i) => `${i + 1}. ${q} (10 marks)`).join('\n\n')}
-
-PART C - Long Answer Questions (50 Marks)
-
-${longQuestions.map((q, i) => `${i + 1}. ${q} (25 marks)`).join('\n\n')}`;
+  return allQuestions.join('\n');
 }
 
 function generateShortQuestionsFromActualContent(content: string, keyTerms: string[], definitions: string[]): string[] {
@@ -564,6 +654,260 @@ Generate the question paper now.`;
     // Fall back to Gemini instead of local generation
     return await generateWithGeminiAI(content, subject, totalMarks);
   }
+}
+
+/**
+ * NEW: Generate questions using the FULL prompt from subject-manager
+ * This respects user configuration for parts and question counts
+ */
+async function generateWithOpenRouterAIFullPrompt(fullPrompt: string): Promise<string> {
+  try {
+    // Force fresh API key load - no caching
+    const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+    
+    console.log('═══════════════════════════════════════════════');
+    console.log('🔑 API KEY CHECK (TIMESTAMP: ' + new Date().toISOString() + ')');
+    console.log('═══════════════════════════════════════════════');
+    console.log('   - Key exists:', !!apiKey);
+    console.log('   - Key length:', apiKey?.length);
+    console.log('   - Key first 30 chars:', apiKey?.substring(0, 30));
+    console.log('   - Key is valid format:', apiKey?.startsWith('sk-or-v1-'));
+    console.log('═══════════════════════════════════════════════');
+    
+    if (!apiKey || apiKey.includes('REPLACE')) {
+      console.warn('⚠️ OpenRouter API key not configured - using local generation');
+      const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+      const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+      const totalMarks = marksMatch ? marksMatch[1] : '100';
+      return generateQuestionsFromPDFContent(content, subject, totalMarks);
+    }
+    
+    console.log('═══════════════════════════════════════════════');
+    console.log('🚀 OPENROUTER API CALL (FULL PROMPT)');
+    console.log('═══════════════════════════════════════════════');
+    console.log(`📝 Full prompt length: ${fullPrompt.length} characters`);
+    console.log(`📖 Prompt preview (first 800 chars):`);
+    console.log(fullPrompt.substring(0, 800));
+    console.log('═══════════════════════════════════════════════');
+    
+    console.log('📤 Sending request to OpenRouter - trying working models...');
+    
+    // Only use models that actually exist and work
+    const workingModels = [
+      { model: 'anthropic/claude-3.5-haiku', maxTokens: 3400 },  // Reduced to fit budget (3493 available)
+      { model: 'anthropic/claude-3-haiku', maxTokens: 3400 },  // Alternative Claude
+      { model: 'google/gemini-flash-1.5-8b', maxTokens: 3400 },  // Gemini
+      { model: 'meta-llama/llama-3.2-3b-instruct:free', maxTokens: 3400 },  // FREE but rate limited
+    ];
+    
+    let response = null;
+    let lastError = null;
+    let successModel = null;
+    
+    // Try each model until one works
+    for (const modelConfig of workingModels) {
+      try {
+        console.log(`🔄 Trying model: ${modelConfig.model} (max_tokens: ${modelConfig.maxTokens})`);
+        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'Quizzy AI Paper Forge'
+          },
+          body: JSON.stringify({
+            model: modelConfig.model,
+            messages: [{
+              role: 'user',
+              content: fullPrompt
+            }],
+            temperature: 0.7,
+            max_tokens: modelConfig.maxTokens
+          })
+        });
+        
+        if (response.ok) {
+          successModel = modelConfig.model;
+          console.log(`✅ SUCCESS with model: ${modelConfig.model}`);
+          break;
+        } else {
+          const errorBody = await response.text();
+          console.warn(`⚠️ Model ${modelConfig.model} failed with status ${response.status}`);
+          console.warn(`📄 Error response: ${errorBody}`);
+          
+          // If rate limited (429), skip to next model immediately
+          if (response.status === 429) {
+            console.log(`⏭️ Rate limited - trying next model...`);
+            lastError = `Rate limited: ${errorBody}`;
+            response = null;
+            continue;
+          }
+          
+          // If 404 (not found), skip immediately
+          if (response.status === 404) {
+            console.log(`⏭️ Model not found - trying next model...`);
+            lastError = `Not found: ${errorBody}`;
+            response = null;
+            continue;
+          }
+          
+          lastError = `Status ${response.status}: ${errorBody}`;
+          response = null;
+        }
+      } catch (error) {
+        console.error(`❌ Model ${modelConfig.model} threw error:`, error);
+        lastError = error;
+        response = null;
+      }
+    }
+    
+    if (!response) {
+      console.error('❌ All models failed or rate limited');
+      console.error('💡 IMMEDIATE SOLUTION: Use Local Generation!');
+      console.error('   1. Select "💻 Local Generation" from dropdown');
+      console.error('   2. Click Generate - it will work immediately');
+      console.error('   3. Questions will be generated from your PDF content');
+      console.error(`📊 Last error: ${lastError}`);
+      throw new Error(`All OpenRouter models failed. Use Local Generation (select from dropdown) - it works immediately!`);
+    }
+    
+    console.log(`🎉 Using model: ${successModel}`);
+
+    console.log(`📥 Response status: ${response.status}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      const generatedText = data.choices[0].message.content;
+      console.log('✅ OpenRouter AI generated questions successfully');
+      console.log(`📊 Generated text length: ${generatedText.length} characters`);
+      console.log(`📖 Generated text preview (first 1000 chars):`);
+      console.log(generatedText.substring(0, 1000));
+      console.log('═══════════════════════════════════════════════');
+      return generatedText;
+    } else {
+      console.warn(`⚠️ OpenRouter API failed with status ${response.status}`);
+      console.log('🔄 Falling back to local generation...');
+      const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+      const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+      const totalMarks = marksMatch ? marksMatch[1] : '100';
+      console.log('📝 Using local generation with full prompt context');
+      return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
+    }
+  } catch (error) {
+    console.error('❌ OpenRouter AI failed:', error);
+    console.log('🔄 Falling back to local generation...');
+    const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+    const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+    const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+    const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+    const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+    const totalMarks = marksMatch ? marksMatch[1] : '100';
+    console.log('📝 Using local generation with full prompt context');
+    return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
+  }
+}
+
+/**
+ * Gemini with full prompt
+ */
+async function generateWithGeminiAIFullPrompt(fullPrompt: string): Promise<string> {
+  try {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    
+    if (!apiKey || apiKey.includes('REPLACE')) {
+      console.warn('⚠️ Gemini API key not configured - using local generation');
+      const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+      const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+      const totalMarks = marksMatch ? marksMatch[1] : '100';
+      return generateQuestionsFromPDFContent(content, subject, totalMarks);
+    }
+    
+    console.log('═══════════════════════════════════════════════');
+    console.log('🚀 GEMINI API CALL (FULL PROMPT)');
+    console.log('═══════════════════════════════════════════════');
+    console.log(`📝 Full prompt length: ${fullPrompt.length} characters`);
+    console.log(`📖 Prompt preview (first 800 chars):`);
+    console.log(fullPrompt.substring(0, 800));
+    console.log('═══════════════════════════════════════════════');
+    
+    console.log('📤 Sending request to Gemini Pro...');
+    
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: fullPrompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4000,
+        }
+      })
+    });
+
+    console.log(`📥 Response status: ${response.status}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+        const generatedText = data.candidates[0].content.parts[0].text;
+        console.log('✅ Gemini AI generated questions successfully');
+        console.log(`📊 Generated text length: ${generatedText.length} characters`);
+        console.log(`📖 Generated text preview (first 1000 chars):`);
+        console.log(generatedText.substring(0, 1000));
+        console.log('═══════════════════════════════════════════════');
+        return generatedText;
+      } else {
+        console.error('❌ Unexpected Gemini response format:', data);
+        throw new Error('Gemini returned unexpected response format');
+      }
+    } else {
+      const errorText = await response.text();
+      console.error(`❌ Gemini API failed with status ${response.status}:`, errorText);
+      console.log('🔄 Falling back to local generation...');
+      const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+      const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+      const totalMarks = marksMatch ? marksMatch[1] : '100';
+      return generateQuestionsFromPDFContent(content, subject, totalMarks);
+    }
+  } catch (error) {
+    console.error('❌ Gemini AI failed:', error);
+    console.log('🔄 Falling back to local generation...');
+    const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+    const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+    const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+    const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+    const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+    const totalMarks = marksMatch ? marksMatch[1] : '100';
+    return generateQuestionsFromPDFContent(content, subject, totalMarks);
+  }
+}
+
+/**
+ * NVIDIA with full prompt
+ */
+async function generateWithNvidiaAIFullPrompt(fullPrompt: string): Promise<string> {
+  // Similar implementation for NVIDIA
+  return generateWithNvidiaAI('', '', ''); // Placeholder
 }
 
 async function generateWithOpenRouterAI(content: string, subject: string, totalMarks: string): Promise<string> {
@@ -1525,6 +1869,74 @@ Generate questions that are directly related to the content provided.`;
 }
 
 /**
+ * NEW: Generate questions using Anthropic Claude API (BEST for PDF content)
+ */
+async function generateWithAnthropicAIFullPrompt(fullPrompt: string): Promise<string> {
+  try {
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    
+    console.log('═══════════════════════════════════════════════');
+    console.log('🔑 ANTHROPIC API KEY CHECK');
+    console.log('═══════════════════════════════════════════════');
+    console.log('   - Key exists:', !!apiKey);
+    console.log('   - Key length:', apiKey?.length);
+    console.log('   - Key first 20 chars:', apiKey?.substring(0, 20));
+    console.log('═══════════════════════════════════════════════');
+    
+    if (!apiKey || apiKey.includes('your-anthropic-key-here')) {
+      console.warn('⚠️ Anthropic API key not configured');
+      console.warn('💡 Get FREE $5 credits at: https://console.anthropic.com/');
+      throw new Error('Anthropic API key not configured. Get your free key at https://console.anthropic.com/');
+    }
+    
+    console.log('🚀 ANTHROPIC CLAUDE API CALL');
+    console.log(`📝 Prompt length: ${fullPrompt.length} characters`);
+    console.log('📤 Sending request to Claude Haiku 3.5...');
+    
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: fullPrompt
+        }]
+      })
+    });
+
+    console.log(`📥 Response status: ${response.status}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      const generatedText = data.content[0].text;
+      console.log('✅ Anthropic Claude generated questions successfully');
+      console.log(`📊 Generated text length: ${generatedText.length} characters`);
+      return generatedText;
+    } else {
+      const errorBody = await response.text();
+      console.error('❌ Anthropic API error:', response.status, errorBody);
+      throw new Error(`Anthropic API failed: ${response.status} - ${errorBody}`);
+    }
+  } catch (error) {
+    console.error('❌ Anthropic AI failed:', error);
+    console.log('🔄 Falling back to local generation...');
+    const contentMatch = fullPrompt.match(/CONTENT TO USE FOR QUESTIONS:\s*([\s\S]*?)(?=\n\nCRITICAL REQUIREMENTS:)/);
+    const content = contentMatch ? contentMatch[1].trim() : fullPrompt;
+    const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
+    const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+    const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
+    const totalMarks = marksMatch ? marksMatch[1] : '100';
+    return generateQuestionsFromPDFContent(content, subject, totalMarks);
+  }
+}
+
+/**
  * Generate questions locally from PDFs (fallback)
  */
 async function generateLocalFromPDFs(
@@ -1555,24 +1967,3 @@ async function generateLocalFromPDFs(
 
 
 
-// NEW: Generate questions in university format
-export async function generateUniversityFormatQuestions(
-  provider: ApiProvider,
-  pdfContent: string,
-  courseName: string,
-  courseCode: string = '21ECE1400'
-): Promise<string> {
-  console.log('🎓 Generating questions in Kalasalingam University format...');
-  
-  // Import university format generator
-  const { generateUniversityQuestions, formatUniversityPaper } = await import('./university-format');
-  
-  // Generate questions from PDF content
-  const paper = generateUniversityQuestions(pdfContent, courseName, courseCode);
-  
-  // Format in university style
-  const formattedPaper = formatUniversityPaper(paper);
-  
-  console.log('✅ University format paper generated successfully');
-  return formattedPaper;
-}

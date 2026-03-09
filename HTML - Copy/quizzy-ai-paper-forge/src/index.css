@@ -58,6 +58,150 @@
   }
 }
 
+/* Question Paper Preview Styles - High Specificity to Override Tailwind */
+.kalasalingam-paper {
+  font-family: 'Times New Roman', Times, serif !important;
+  line-height: 1.6 !important;
+  color: #000 !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper * {
+  box-sizing: border-box !important;
+}
+
+.kalasalingam-paper table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin-bottom: 20px !important;
+  border: 2px solid #000 !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper table th,
+.kalasalingam-paper table td {
+  border: 1px solid #000 !important;
+  padding: 8px !important;
+  text-align: left !important;
+  vertical-align: top !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper table th {
+  background-color: #f0f0f0 !important;
+  font-weight: bold !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .header {
+  text-align: center !important;
+  border: 2px solid #000 !important;
+  padding: 15px !important;
+  margin-bottom: 20px !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper .header h1 {
+  font-size: 16pt !important;
+  font-weight: bold !important;
+  margin-bottom: 5px !important;
+}
+
+.kalasalingam-paper .header p {
+  font-size: 11pt !important;
+  margin: 3px 0 !important;
+}
+
+.kalasalingam-paper .course-details table {
+  border: none !important;
+}
+
+.kalasalingam-paper .course-details td {
+  border: none !important;
+  padding: 4px 8px !important;
+}
+
+.kalasalingam-paper .cos-section {
+  border: 2px solid #000 !important;
+  margin: 20px 0 !important;
+  padding: 10px !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper .cos-section h3 {
+  font-size: 11pt !important;
+  font-weight: bold !important;
+  margin-bottom: 10px !important;
+}
+
+.kalasalingam-paper .part-title {
+  border: 2px solid #000 !important;
+  padding: 10px !important;
+  margin: 20px 0 10px 0 !important;
+  text-align: center !important;
+  background: #fff !important;
+}
+
+.kalasalingam-paper .part-title h2 {
+  font-size: 12pt !important;
+  font-weight: bold !important;
+  margin-bottom: 5px !important;
+}
+
+.kalasalingam-paper .questions-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin: 20px 0 !important;
+  font-size: 10pt !important;
+}
+
+.kalasalingam-paper .questions-table th,
+.kalasalingam-paper .questions-table td {
+  border: 1px solid #000 !important;
+  padding: 8px 6px !important;
+  text-align: left !important;
+  vertical-align: top !important;
+}
+
+.kalasalingam-paper .questions-table .q-no {
+  width: 40px !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .questions-table .q-pattern {
+  width: 90px !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .questions-table .q-co {
+  width: 70px !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .questions-table .q-marks {
+  width: 50px !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .assessment-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin: 10px 0 !important;
+  font-size: 10pt !important;
+}
+
+.kalasalingam-paper .assessment-table th,
+.kalasalingam-paper .assessment-table td {
+  border: 1px solid #000 !important;
+  padding: 8px !important;
+  text-align: center !important;
+}
+
+.kalasalingam-paper .assessment-table th {
+  background-color: #f0f0f0 !important;
+  font-weight: bold !important;
+}
+
 /* Smooth floating animations for background tools */
 @keyframes float-smooth {
   0%, 100% {

@@ -233,7 +233,7 @@ export async function generatePromptFromSubjectUnits(
     totalQuestions: number;
     totalMarks: number;
     difficulty: string;
-    parts: Array<{ name: string; questions: number; marks: number }>;
+    parts: Array<{ name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean }>;
   }
 ): Promise<string> {
   console.log('🎯🎯🎯 generatePromptFromSubjectUnits CALLED 🎯🎯🎯');
@@ -344,7 +344,7 @@ export async function generatePromptFromSubjectUnits(
     console.log(`   - actualContent preview: ${actualContent.substring(0, 100)}...`);
     console.log(`   - file_url: ${unit.file_url || 'NONE'}`);
     
-    const maxLength = Math.floor((weightage / 100) * 3000);
+    const maxLength = Math.floor((weightage / 100) * 2000); // Reduced from 3000 to 2000 for API limits
     const content = actualContent.length > maxLength 
       ? actualContent.substring(0, maxLength) + '...'
       : actualContent;
@@ -365,47 +365,90 @@ export async function generatePromptFromSubjectUnits(
   // CRITICAL: Log the final prompt content
   console.log(`🎯 FINAL PROMPT CONTENT SECTIONS LENGTH: ${contentSections.length} characters`);
   console.log(`📝 Content sections preview: ${contentSections.substring(0, 200)}...`);
+  
+  // Build parts description from user configuration with EXPLICIT question counts
+  let partsDescription = '';
+  let totalQuestionsToGenerate = 0;
+  
+  questionConfig.parts.forEach(part => {
+    const difficultyLabel = part.difficulty.toUpperCase();
+    const requiredQuestions = part.questions;
+    const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
+    totalQuestionsToGenerate += questionsToGenerate;
+    
+    const choiceInfo = part.choicesEnabled 
+      ? ` [GENERATE ${questionsToGenerate} questions, student answers ANY ${requiredQuestions}]` 
+      : ` [GENERATE ${questionsToGenerate} questions, student answers ALL ${requiredQuestions}]`;
+    
+    partsDescription += `\n${part.name.toUpperCase()} - ${part.marks} marks [DIFFICULTY: ${difficultyLabel}]${choiceInfo}`;
+  });
+  
+  console.log(`📋 Parts configuration: ${partsDescription}`);
+  console.log(`📊 Total questions to generate: ${totalQuestionsToGenerate}`);
 
-  const prompt = `You are an expert academic question paper generator. Create a professional question paper based EXCLUSIVELY on the provided content.
+  const prompt = `You are an expert academic question paper generator. You have been given SPECIFIC CONTENT extracted from a PDF document. Students have ONLY studied this exact content - nothing else.
 
 SUBJECT: ${subject.subject_name}
 TOTAL MARKS: ${questionConfig.totalMarks}
 
-CONTENT TO USE FOR QUESTIONS:
+PARTS CONFIGURATION (READ CAREFULLY - EXACT QUESTION COUNTS):${partsDescription}
+
+TOTAL QUESTIONS YOU MUST GENERATE: ${totalQuestionsToGenerate}
+
+=== EXACT CONTENT FROM PDF (Students studied ONLY this) ===
 ${contentSections}
+=== END OF PDF CONTENT ===
 
-ABSOLUTE REQUIREMENTS:
-1. Create questions ONLY about topics actually mentioned in the content above
-2. Use SPECIFIC terms, concepts, and information from the content
-3. Do NOT use generic phrases like "discussed in the material", "outlined in the PDF", "mentioned in the document"
-4. Reference ACTUAL content - if content mentions "Nmap", ask about Nmap specifically
-5. If content mentions "SQL injection", ask about SQL injection specifically
-6. If content mentions "penetration testing phases", ask about those specific phases
+CRITICAL INSTRUCTIONS:
+1. Read the PDF content above CAREFULLY - every word matters
+2. YOU MUST GENERATE EXACTLY ${totalQuestionsToGenerate} QUESTIONS TOTAL
+3. Follow the EXACT question counts specified for each part above
+4. Questions MUST be about SPECIFIC topics, terms, definitions, examples, and concepts that appear in the PDF content above
+5. Use EXACT names, terms, and examples from the PDF (e.g., if PDF says "Herbert Simon", use "Herbert Simon")
+6. Reference SPECIFIC definitions or perspectives mentioned (e.g., "Tom Mitchell's 1998 definition")
+7. Ask about SPECIFIC examples described (e.g., "checkers game", "handwritten word recognition")
+8. DO NOT ask generic textbook questions - ask about THIS specific PDF content
 
-FORMAT:
-${subject.subject_name}
-Total Marks: ${questionConfig.totalMarks}
+DIFFICULTY LEVELS for each part:
+${questionConfig.parts.map(part => `   - ${part.name}: ${part.difficulty.toUpperCase()} difficulty - ${
+  part.difficulty === 'easy' ? 'Simple recall, definitions, basic concepts' :
+  part.difficulty === 'medium' ? 'Explanations, comparisons, applications' :
+  'Analysis, evaluation, synthesis, complex problem-solving'
+}`).join('\n')}
 
-PART A - Short Answer Questions (20 Marks)
-[5 specific questions about content topics]
+FORBIDDEN - DO NOT DO THIS:
+❌ Generic questions like "What is ${subject.subject_name}?" (too broad)
+❌ Questions not based on the PDF content above
+❌ Phrases like "according to content", "as discussed", "mentioned in", "in the document"
+❌ Vague questions that could apply to any textbook
+❌ Generating fewer questions than specified above
 
-PART B - Medium Answer Questions (30 Marks)
-[3 specific questions about content topics]
+REQUIRED - DO THIS:
+✅ Use SPECIFIC names from PDF (e.g., "Herbert Simon", "Tom Mitchell")
+✅ Reference SPECIFIC examples from PDF (e.g., "checkers game", "highway driving")
+✅ Use EXACT terminology and definitions from PDF
+✅ Ask about SPECIFIC concepts, methods, or approaches described in PDF
+✅ Generate EXACTLY ${totalQuestionsToGenerate} questions as specified in parts configuration
 
-PART C - Long Answer Questions (50 Marks)
-[2 specific questions about content topics]
+QUESTION FORMAT:
+Q[number]. [Specific question using exact terms/names/examples from PDF] | [Bloom's Level] | [CO number]
 
-EXAMPLES OF GOOD QUESTIONS (if content contains these topics):
-- "Define ethical hacking and explain the five phases of penetration testing"
-- "List the SQL commands CREATE, ALTER, DROP and explain their functions"
-- "Describe how Nmap and Metasploit are used in security testing"
+Bloom's Level must be: Remember, Understand, Apply, Analyze, Evaluate, or Create
+CO number should be: 2, 3, or 4
 
-EXAMPLES OF BAD QUESTIONS (generic - DO NOT USE):
-- "Based on the document, explain..."
-- "Describe the fundamental principles outlined in the PDF"
-- "What are the theoretical foundations discussed in the material"
+NOW GENERATE ALL ${totalQuestionsToGenerate} QUESTIONS:
+${questionConfig.parts.map((part, idx) => {
+  const requiredQuestions = part.questions;
+  const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
+  const startNum = idx === 0 ? 1 : questionConfig.parts.slice(0, idx).reduce((sum, p) => {
+    const req = p.questions;
+    return sum + (p.choicesEnabled ? Math.ceil(req * 1.5) : req);
+  }, 0) + 1;
+  const endNum = startNum + questionsToGenerate - 1;
+  return `\n--- ${part.name.toUpperCase()} (Generate ${questionsToGenerate} questions: Q${startNum} to Q${endNum}) ---`;
+}).join('')}
 
-Generate the question paper now using ONLY the specific content provided:`;
+Generate all ${totalQuestionsToGenerate} questions now using ONLY the specific PDF content above:`;
 
   return prompt;
 }

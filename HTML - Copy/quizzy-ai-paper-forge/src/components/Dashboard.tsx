@@ -24,10 +24,12 @@ import {
   FilePlus,
   BarChart,
   Trash2,
+  Eye,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { downloadPaperAsPDF } from "@/lib/paper";
+import { QuestionPaperPreview } from "@/components/QuestionPaperPreview";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -38,7 +40,10 @@ export function Dashboard() {
   const { user, profile, signOut } = useAuth();
   const [showSubjectsDialog, setShowSubjectsDialog] = useState(false);
   const [showPapersDialog, setShowPapersDialog] = useState(false);
+  const [previewPaper, setPreviewPaper] = useState<any | null>(null);
   const [subjectToDelete, setSubjectToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [selectedPapers, setSelectedPapers] = useState<number[]>([]);
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [users, setUsers] = useState<any[]>([]);
@@ -85,6 +90,13 @@ export function Dashboard() {
           id: paper.id,
           subjectName: subject?.subject_name || 'Loading...', // Ensure subjectName is always available
           generatedAt: new Date(paper.created_at),
+          generatedBy: paper.generated_by || 'AI System',
+          config: paper.paper_config || paper.generated_questions?.config || {
+            totalMarks: paper.total_marks || 50,
+            totalQuestions: paper.total_questions || 25,
+            difficulty: 'medium',
+            parts: []
+          },
           questions: Array.isArray(paper.generated_questions) // Ensure questions is an array
             ? paper.generated_questions
             : (paper.generated_questions?.questions || []),
@@ -143,6 +155,9 @@ export function Dashboard() {
 
       if (error) throw error;
 
+      // Remove from selected papers if it was selected
+      setSelectedPapers(prev => prev.filter(id => id !== paperId));
+
       // Invalidate and refetch papers query
       await queryClient.invalidateQueries({ queryKey: ['papers'] });
       
@@ -154,6 +169,92 @@ export function Dashboard() {
       toast({
         title: "Error",
         description: `Failed to delete paper: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleToggleSelect = (paperId: number) => {
+    setSelectedPapers(prev => 
+      prev.includes(paperId) 
+        ? prev.filter(id => id !== paperId)
+        : [...prev, paperId]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedPapers.length === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${selectedPapers.length} selected paper(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('question_papers')
+        .delete()
+        .in('id', selectedPapers)
+        .eq('user_id', user?.id);
+
+      if (error) throw error;
+
+      // Clear selection
+      setSelectedPapers([]);
+
+      // Invalidate and refetch papers query
+      await queryClient.invalidateQueries({ queryKey: ['papers'] });
+      
+      toast({
+        title: "Success",
+        description: `${selectedPapers.length} paper(s) deleted successfully.`
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: `Failed to delete papers: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleToggleSelectSubject = (subjectId: string) => {
+    setSelectedSubjects(prev => 
+      prev.includes(subjectId) 
+        ? prev.filter(id => id !== subjectId)
+        : [...prev, subjectId]
+    );
+  };
+
+  const handleBulkDeleteSubjects = async () => {
+    if (selectedSubjects.length === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${selectedSubjects.length} selected subject(s)? This will also delete all associated units and question papers. This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('subjects')
+        .delete()
+        .in('id', selectedSubjects)
+        .eq('user_id', user?.id);
+
+      if (error) throw error;
+
+      // Clear selection
+      setSelectedSubjects([]);
+
+      // Invalidate and refetch subjects query
+      await queryClient.invalidateQueries({ queryKey: ['subjects'] });
+      
+      toast({
+        title: "Success",
+        description: `${selectedSubjects.length} subject(s) deleted successfully.`
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: `Failed to delete subjects: ${error.message}`,
         variant: "destructive"
       });
     }
@@ -195,6 +296,16 @@ export function Dashboard() {
   }
 
   const renderContent = () => {
+    // Show preview if a paper is selected
+    if (previewPaper) {
+      return (
+        <QuestionPaperPreview 
+          paper={previewPaper} 
+          onBack={() => setPreviewPaper(null)}
+        />
+      );
+    }
+
     switch (currentView) {
       case 'subjects':
         return <SubjectSetup onSubjectCreated={() => setCurrentView('configure')} />; // Corrected prop name
@@ -284,20 +395,54 @@ export function Dashboard() {
             <Dialog open={showSubjectsDialog} onOpenChange={setShowSubjectsDialog}>
               <DialogContent className="max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle className="flex items-center">
-                    <Book className="w-5 h-5 mr-2" />
-                    Active Subjects
+                  <DialogTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Book className="w-5 h-5 mr-2" />
+                      Active Subjects
+                    </div>
+                    {subjects.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const allIds = subjects.map(s => s.id);
+                            setSelectedSubjects(selectedSubjects.length === allIds.length ? [] : allIds);
+                          }}
+                        >
+                          {selectedSubjects.length === subjects.length ? 'Deselect All' : 'Select All'}
+                        </Button>
+                        {selectedSubjects.length > 0 && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleBulkDeleteSubjects}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete Selected ({selectedSubjects.length})
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="max-h-[60vh] overflow-y-auto space-y-4 p-4 border rounded-md bg-muted/20">
                   {subjects.length > 0 ? (
                     subjects.map((subject) => (
-                      <Card key={subject.id} className="shadow-md hover:shadow-lg transition-shadow">
+                      <Card key={subject.id} className={`shadow-md hover:shadow-lg transition-shadow ${selectedSubjects.includes(subject.id) ? 'ring-2 ring-primary' : ''}`}>
                         <CardHeader>
                           <div className="flex justify-between items-start">
-                            <div>
-                              <CardTitle className="text-lg">{subject.subject_name}</CardTitle>
-                              <CardDescription>{subject.subject_description}</CardDescription>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedSubjects.includes(subject.id)}
+                                onChange={() => handleToggleSelectSubject(subject.id)}
+                                className="w-4 h-4 cursor-pointer"
+                              />
+                              <div>
+                                <CardTitle className="text-lg">{subject.subject_name}</CardTitle>
+                                <CardDescription>{subject.subject_description}</CardDescription>
+                              </div>
                             </div>
                             <Badge variant="secondary">{subject.course_code || 'N/A'}</Badge>
                           </div>
@@ -334,24 +479,69 @@ export function Dashboard() {
             <Dialog open={showPapersDialog} onOpenChange={setShowPapersDialog}>
               <DialogContent className="max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle className="flex items-center">
-                    <FileText className="w-5 h-5 mr-2" />
-                    Generated Papers
+                  <DialogTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <FileText className="w-5 h-5 mr-2" />
+                      Generated Papers
+                    </div>
+                    {questionPapers.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const allIds = questionPapers.map(p => p.id);
+                            setSelectedPapers(selectedPapers.length === allIds.length ? [] : allIds);
+                          }}
+                        >
+                          {selectedPapers.length === questionPapers.length ? 'Deselect All' : 'Select All'}
+                        </Button>
+                        {selectedPapers.length > 0 && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleBulkDelete}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete Selected ({selectedPapers.length})
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="max-h-[60vh] overflow-y-auto space-y-4 p-4 border rounded-md bg-muted/20">
                   {questionPapers.length > 0 ? (
                     questionPapers.map((paper) => (
-                      <Card key={paper.id} className="shadow-md hover:shadow-lg transition-shadow">
+                      <Card key={paper.id} className={`shadow-md hover:shadow-lg transition-shadow ${selectedPapers.includes(paper.id) ? 'ring-2 ring-primary' : ''}`}>
                         <CardHeader>
                           <div className="flex justify-between items-start">
-                            <div>
-                              <CardTitle className="text-lg">{paper.subjectName}</CardTitle>
-                              <CardDescription>Generated on {paper.generatedAt.toLocaleDateString()}</CardDescription>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedPapers.includes(paper.id)}
+                                onChange={() => handleToggleSelect(paper.id)}
+                                className="w-4 h-4 cursor-pointer"
+                              />
+                              <div>
+                                <CardTitle className="text-lg">{paper.subjectName}</CardTitle>
+                                <CardDescription>Generated on {paper.generatedAt.toLocaleDateString()}</CardDescription>
+                              </div>
                             </div>
                           </div>
                         </CardHeader>
                         <CardContent className="flex justify-end items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setPreviewPaper(paper);
+                              setShowPapersDialog(false);
+                            }}
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            Preview
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"

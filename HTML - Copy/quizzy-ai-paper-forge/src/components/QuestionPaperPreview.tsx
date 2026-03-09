@@ -1,9 +1,8 @@
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Download, FileText } from 'lucide-react';
+import { ArrowLeft, Download, FileText, ExternalLink } from 'lucide-react';
 import { downloadPaperAsPDF, type QuestionPaper } from '@/lib/paper';
+import { useEffect, useRef } from 'react';
 
 interface QuestionPaperPreviewProps {
   paper: QuestionPaper;
@@ -11,27 +10,50 @@ interface QuestionPaperPreviewProps {
 }
 
 export function QuestionPaperPreview({ paper, onBack }: QuestionPaperPreviewProps) {
-  // Debug logging
-  console.log('QuestionPaperPreview received paper:', paper);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   
-  // Error handling for missing paper data
+  useEffect(() => {
+    if (iframeRef.current && paper?.content) {
+      const iframe = iframeRef.current;
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(paper.content);
+        iframeDoc.close();
+        
+        // Auto-adjust iframe height after content loads
+        setTimeout(() => {
+          try {
+            const contentHeight = iframeDoc.body.scrollHeight;
+            iframe.style.height = Math.max(contentHeight + 50, 800) + 'px';
+          } catch (e) {
+            console.error('Could not adjust iframe height:', e);
+          }
+        }, 100);
+      }
+    }
+  }, [paper?.content]);
+  
   if (!paper) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        </div>
-        <Card>
-          <CardContent className="p-6 text-center">
-            <p className="text-red-500">Error: No paper data available to preview</p>
-          </CardContent>
-        </Card>
+      <div className="space-y-6 p-6">
+        <Button variant="outline" onClick={onBack}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back
+        </Button>
+        <p className="text-red-500">Error: No paper data available to preview</p>
       </div>
     );
   }
+  
+  const openInNewWindow = () => {
+    const newWindow = window.open('', '_blank', 'width=900,height=1200');
+    if (newWindow) {
+      newWindow.document.write(paper.content);
+      newWindow.document.close();
+    }
+  };
   
   return (
     <div className="space-y-6">
@@ -41,61 +63,49 @@ export function QuestionPaperPreview({ paper, onBack }: QuestionPaperPreviewProp
           Back
         </Button>
         <div className="flex gap-2">
-          <Button onClick={() => downloadPaperAsPDF(paper)}>
-            <Download className="w-4 h-4 mr-2" />
-            Download as PDF
+          <Button variant="default" onClick={openInNewWindow}>
+            <ExternalLink className="w-4 h-4 mr-2" />
+            Open in New Window (Recommended)
           </Button>
-          {(window as any).currentQuestionPaperHTML && (
-            <Button 
-              variant="outline"
-              onClick={() => {
-                const printWindow = window.open('', '_blank');
-                if (printWindow) {
-                  printWindow.document.write((window as any).currentQuestionPaperHTML);
-                  printWindow.document.close();
-                  setTimeout(() => printWindow.print(), 250);
-                }
-              }}
-            >
-              <FileText className="w-4 h-4 mr-2" />
-              Print
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => downloadPaperAsPDF(paper)}>
+            <Download className="w-4 h-4 mr-2" />
+            Download PDF
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={() => {
+              const printWindow = window.open('', '_blank');
+              if (printWindow) {
+                printWindow.document.write(paper.content);
+                printWindow.document.close();
+                setTimeout(() => printWindow.print(), 500);
+              }
+            }}
+          >
+            <FileText className="w-4 h-4 mr-2" />
+            Print
+          </Button>
         </div>
       </div>
 
-      <Card className="print:shadow-none">
-        <CardHeader className="text-center border-b">
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold">{paper.subjectName || 'Question Paper'}</h2>
-            <div className="flex justify-between items-center text-sm text-muted-foreground">
-              <div className="flex items-center">
-                <FileText className="w-4 h-4 mr-1" />
-                {paper.generatedAt ? new Date(paper.generatedAt).toLocaleDateString() : 'Unknown Date'}
-              </div>
-              <Badge variant="outline">
-                Max Marks: {paper.config?.totalMarks || 'N/A'}
-              </Badge>
-            </div>
-          </div>
-        </CardHeader>
+      <div className="bg-gray-100 p-4 rounded-lg">
+        <p className="text-sm text-gray-600 mb-2">
+          💡 For best viewing experience, click "Open in New Window" button above
+        </p>
+      </div>
 
-        <CardContent className="p-6">
-          <div className="prose max-w-none">
-            {/* Check if HTML format is available */}
-            {(window as any).currentQuestionPaperHTML ? (
-              <div 
-                dangerouslySetInnerHTML={{ __html: (window as any).currentQuestionPaperHTML }}
-                className="kalasalingam-paper"
-              />
-            ) : (
-              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                {paper.content || 'No content available'}
-              </pre>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="border-2 border-gray-300 rounded-lg overflow-auto bg-white shadow-lg">
+        <iframe
+          ref={iframeRef}
+          title="Question Paper Preview"
+          className="w-full"
+          style={{ 
+            border: 'none',
+            minHeight: '800px',
+            display: 'block'
+          }}
+        />
+      </div>
     </div>
   );
 }
