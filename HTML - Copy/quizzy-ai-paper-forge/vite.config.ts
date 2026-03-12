@@ -5,8 +5,8 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  // Base path for GitHub Pages deployment
-  base: mode === 'production' ? '/quizzy-ai-paper-forge/' : '/',
+  // Base path - use '/' for Vercel, '/quizzy-ai-paper-forge/' for GitHub Pages
+  base: '/',
   
   server: {
     host: "0.0.0.0", // Listen on all network interfaces (allows access from other devices)

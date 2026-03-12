@@ -49,6 +49,7 @@ interface UserData {
     role?: string;
     subject_handled?: string;
   };
+  is_blocked?: boolean;
   banned_until?: string;
   email_confirmed_at?: string;
 }
@@ -172,21 +173,34 @@ export function UserManagement() {
 
     setLoading(true);
     try {
-      // Note: In production, you'd need admin API access to delete users
-      // For now, we'll just show a message
+      // Delete from user_profiles table (soft delete approach)
+      const { error } = await supabase
+        .from('user_profiles')
+        .delete()
+        .eq('id', deleteDialog.userId);
+
+      if (error) {
+        console.error('Delete error:', error);
+        throw error;
+      }
+
       toast({
-        title: "Delete User",
-        description: "User deletion requires admin API access. Contact system administrator.",
-        variant: "destructive",
+        title: "User Removed",
+        description: "User has been removed from the system successfully.",
       });
       
       setDeleteDialog({ open: false, userId: null });
+      
+      // Refresh the users list
+      await fetchUsers();
     } catch (error: any) {
+      console.error('Delete user error:', error);
       toast({
-        title: "Error",
-        description: error.message,
+        title: "Error Deleting User",
+        description: error.message || "Failed to delete user. Please try again.",
         variant: "destructive",
       });
+      setDeleteDialog({ open: false, userId: null });
     } finally {
       setLoading(false);
     }
@@ -199,18 +213,37 @@ export function UserManagement() {
     try {
       const action = blockDialog.action;
       
-      // Note: Blocking users requires admin API access
+      // Update user_profiles table with is_blocked field
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({
+          is_blocked: action === 'block' ? true : false,
+          banned_until: action === 'block' 
+            ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() // Block for 1 year
+            : null // Unblock by setting to null
+        })
+        .eq('id', blockDialog.userId);
+
+      if (error) {
+        console.error('Block/Unblock error:', error);
+        throw error;
+      }
+      
+      // Close dialog first
+      setBlockDialog({ open: false, userId: null, action: 'block' });
+      
+      // Refresh the users list
+      await fetchUsers();
+      
+      // Show success message after refresh
       toast({
         title: action === 'block' ? "User Blocked" : "User Unblocked",
-        description: `User has been ${action === 'block' ? 'blocked' : 'unblocked'} successfully.`,
+        description: `User has been ${action === 'block' ? 'blocked' : 'unblocked'} successfully. Blocked users: ${users.filter(u => u.is_blocked).length}`,
       });
-      
-      setBlockDialog({ open: false, userId: null, action: 'block' });
-      fetchUsers();
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to update user status. Make sure to run ADD_BLOCKED_USERS_COLUMN.sql in Supabase.",
         variant: "destructive",
       });
     } finally {
@@ -221,8 +254,7 @@ export function UserManagement() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      // TEMPORARY WORKAROUND: Show message that SQL script needs to be run
-      console.log('⚠️ Attempting to fetch users from user_profiles table...');
+      console.log('🔄 Fetching users from user_profiles table...');
       
       const { data, error } = await supabase
         .from('user_profiles')
@@ -232,47 +264,47 @@ export function UserManagement() {
       if (error) {
         console.error('❌ Error fetching users:', error);
         
-        // Show helpful error message
         toast({
-          title: "Database Setup Required",
-          description: "Please run the SQL script (QUICK_FIX_SQL.sql) in Supabase SQL Editor to create the user_profiles table.",
+          title: "Database Error",
+          description: error.message || "Failed to fetch users. Please check database setup.",
           variant: "destructive",
         });
         
-        // Set empty users array
         setUsers([]);
         return;
       }
 
+      console.log('📊 Raw data from database:', data);
+
       // Transform data to match UserData interface
-      const transformedUsers: UserData[] = (data || []).map(profile => ({
-        id: profile.id,
-        email: profile.email,
-        created_at: profile.created_at,
-        last_sign_in_at: profile.last_sign_in_at,
-        user_metadata: {
-          first_name: profile.first_name,
-          last_name: profile.last_name,
-          role: profile.role,
-          subject_handled: profile.subject_handled
-        },
-        email_confirmed_at: profile.created_at
-      }));
+      const transformedUsers: UserData[] = (data || []).map(profile => {
+        console.log(`User ${profile.email}: is_blocked =`, profile.is_blocked);
+        return {
+          id: profile.id,
+          email: profile.email,
+          created_at: profile.created_at,
+          last_sign_in_at: profile.last_sign_in_at,
+          user_metadata: {
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            role: profile.role,
+            subject_handled: profile.subject_handled
+          },
+          is_blocked: profile.is_blocked || false,
+          banned_until: profile.banned_until,
+          email_confirmed_at: profile.created_at
+        };
+      });
 
       setUsers(transformedUsers);
       console.log(`✅ Loaded ${transformedUsers.length} users from database`);
+      console.log(`🚫 Blocked users count: ${transformedUsers.filter(u => u.is_blocked).length}`);
       
-      if (transformedUsers.length > 0) {
-        toast({
-          title: "Users Loaded Successfully",
-          description: `Found ${transformedUsers.length} user(s) in the system.`,
-        });
-      }
     } catch (error: any) {
       console.error('❌ Error fetching users:', error);
       toast({
-        title: "Database Setup Required",
-        description: "Please run QUICK_FIX_SQL.sql in Supabase to create the user_profiles table.",
+        title: "Error",
+        description: error.message || "Failed to fetch users.",
         variant: "destructive",
       });
       setUsers([]);
@@ -287,7 +319,7 @@ export function UserManagement() {
 
   const staffUsers = users.filter(u => u.user_metadata?.role === 'staff');
   const adminUsers = users.filter(u => u.user_metadata?.role === 'admin');
-  const blockedUsers = users.filter(u => u.banned_until);
+  const blockedUsers = users.filter(u => u.is_blocked === true);
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Never';
@@ -295,8 +327,7 @@ export function UserManagement() {
   };
 
   const isUserBlocked = (user: UserData) => {
-    if (!user.banned_until) return false;
-    return new Date(user.banned_until) > new Date();
+    return user.is_blocked === true;
   };
 
   return (
@@ -475,6 +506,81 @@ export function UserManagement() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Blocked Users Section */}
+      {blockedUsers.length > 0 && (
+        <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-700 dark:text-red-400">
+              <Ban className="w-5 h-5" />
+              Blocked Users ({blockedUsers.length})
+            </CardTitle>
+            <CardDescription>
+              Users who are currently blocked from accessing the system
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border border-red-200">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Blocked Until</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {blockedUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">
+                        {user.user_metadata?.first_name} {user.user_metadata?.last_name}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-3 h-3 text-muted-foreground" />
+                          {user.email}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {user.user_metadata?.role === 'admin' ? (
+                          <Badge variant="destructive">
+                            <Shield className="w-3 h-3 mr-1" />
+                            Admin
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">
+                            <UserCheck className="w-3 h-3 mr-1" />
+                            Staff
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDate(user.banned_until)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => setBlockDialog({ 
+                            open: true, 
+                            userId: user.id, 
+                            action: 'unblock' 
+                          })}
+                        >
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Unblock User
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* All Staff Members Table */}
       <Card>
