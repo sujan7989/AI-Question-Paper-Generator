@@ -262,15 +262,37 @@ export function SubjectSetup({ onSubjectCreated }: SubjectSetupProps) {
             )}
             
             {isLoading && (
-              <Alert>
-                <Brain className="h-4 w-4" />
+              <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
+                <Brain className="h-4 w-4 text-blue-600 animate-pulse" />
                 <AlertDescription>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{processingMessage}</span>
-                      <span className="text-sm text-muted-foreground">{Math.round(processingProgress)}%</span>
+                      <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{processingMessage}</span>
+                      <span className="text-sm font-bold text-blue-600">{Math.round(processingProgress)}%</span>
                     </div>
-                    <Progress value={processingProgress} className="w-full" />
+                    <Progress value={processingProgress} className="w-full h-2" />
+                    <div className="grid grid-cols-4 gap-1 text-xs text-center">
+                      {[
+                        { label: 'Creating Subject', threshold: 20 },
+                        { label: 'Uploading PDFs', threshold: 50 },
+                        { label: 'Extracting Content', threshold: 80 },
+                        { label: 'Saving to DB', threshold: 100 },
+                      ].map((step) => (
+                        <div
+                          key={step.label}
+                          className={`p-1 rounded text-xs ${
+                            processingProgress >= step.threshold
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                              : processingProgress >= step.threshold - 30
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 animate-pulse'
+                              : 'bg-gray-100 text-gray-400 dark:bg-gray-800'
+                          }`}
+                        >
+                          {processingProgress >= step.threshold ? '✓ ' : ''}{step.label}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Please wait — PDF extraction may take 10–30 seconds per file.</p>
                   </div>
                 </AlertDescription>
               </Alert>

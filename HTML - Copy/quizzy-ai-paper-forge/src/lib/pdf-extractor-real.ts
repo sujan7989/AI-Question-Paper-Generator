@@ -47,7 +47,7 @@ export async function extractRealPDFContent(file: File): Promise<PDFExtractionRe
         
         // Extract text items
         const pageText = textContent.items
-          .map((item: any) => item.str || '')
+          .map((item: any) => ('str' in item ? item.str : '') || '')
           .join(' ')
           .trim();
         
@@ -67,8 +67,8 @@ export async function extractRealPDFContent(file: File): Promise<PDFExtractionRe
     
     // Sanitize text
     fullText = fullText
-      .replace(/\u0000/g, '')
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .replace(/[\0]/g, '')
+      .replace(/[\0-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
       .trim();
     
     if (fullText.length < 50) {

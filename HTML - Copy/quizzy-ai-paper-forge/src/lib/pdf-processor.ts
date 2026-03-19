@@ -1,12 +1,9 @@
 // PDF processing utilities
 import * as pdfjsLib from 'pdfjs-dist';
-import { extractPDFContentFallback, createSamplePDFContent } from './pdf-fallback';
 
 // Configure PDF.js worker with correct version to match installed package
 // Using CDN with the correct version to avoid build/bundling issues
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs`;
-
-console.log('📚 PDF.js worker configured:', pdfjsLib.GlobalWorkerOptions.workerSrc);
 
 export interface PDFContent {
   text: string;
@@ -25,10 +22,10 @@ function sanitizeText(text: string): string {
   if (!text) return '';
   
   return text
-    // Remove null bytes (\u0000)
-    .replace(/\u0000/g, '')
+    // Remove null bytes (\x00)
+    .replace(/[\0]/g, '')
     // Remove other control characters except newlines and tabs
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[\0-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     // Remove invalid Unicode surrogates
     .replace(/[\uD800-\uDFFF]/g, '')
     // Normalize whitespace
@@ -95,7 +92,7 @@ export async function extractPDFContent(file: File): Promise<PDFContent> {
   const fileName = file.name.toLowerCase();
   
   let extractedText = '';
-  let title = file.name.replace('.pdf', '');
+  const title = file.name.replace('.pdf', '');
   
   if (fileName.includes('hacking') || fileName.includes('security') || fileName.includes('penetration')) {
     extractedText = `Introduction to Ethical Hacking
@@ -311,7 +308,7 @@ async function extractPDFContentMain(file: File): Promise<PDFContent> {
     console.log(`📄 PDF loaded successfully: ${pdf.numPages} pages`);
     
     // Extract metadata safely
-    let metadata: any = {};
+    let metadata: { info?: { Title?: string; Author?: string; Subject?: string; Keywords?: string } } = {};
     try {
       metadata = await pdf.getMetadata();
     } catch (metaError) {

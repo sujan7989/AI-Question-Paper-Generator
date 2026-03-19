@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { toast } from '@/components/ui/use-toast';
 import { QuestionPaperPreview } from '@/components/QuestionPaperPreview';
 import { PapersList } from '@/components/PapersList';
 import { GeneratingAnimation } from '@/components/GeneratingAnimation';
@@ -48,7 +47,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [totalMarks, setTotalMarks] = useState(100);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [apiProvider, setApiProvider] = useState<ApiProvider>('openrouter'); // OpenRouter with Claude - should work now!
+  const [apiProvider, setApiProvider] = useState<ApiProvider>('nvidia'); // NVIDIA as primary
   const [totalQuestions, setTotalQuestions] = useState<number>(10);
   const [parts, setParts] = useState<Part[]>([
     { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy' },
@@ -64,7 +63,14 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   const [error, setError] = useState<string | null>(null);
   const [unitWeightages, setUnitWeightages] = useState<{ [unitId: string]: number }>({});
   const [weightageError, setWeightageError] = useState<string | null>(null);
-  const [latestPaper, setLatestPaper] = useState<QuestionPaper | null>(null);
+  const [latestPaper, setLatestPaper] = useState<QuestionPaper | null>(() => {
+    try {
+      const saved = localStorage.getItem('lastPaper');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [viewingAllPapers, setViewingAllPapers] = useState(false);
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
@@ -244,14 +250,26 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       loadingToastRef.current.dismiss();
       loadingToastRef.current = null;
     }
+
+    // Listen for AI fallback warning from ai.ts
+    const fallbackHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      toast({
+        title: '⚠️ AI Providers Busy',
+        description: detail?.message || 'All AI providers are rate-limited. Using local generation — quality may be lower.',
+        variant: 'destructive',
+      });
+    };
+    window.addEventListener('ai-fallback-warning', fallbackHandler);
     
     try {
       // Show loading toast
       const providerNames = {
         nvidia: 'NVIDIA AI (Llama 3.1 405B)',
-        gemini: 'Google Gemini 1.5 Pro',
-        openrouter: 'OpenRouter (Claude 3 Haiku)',
-        local: 'Local Generation'
+        openrouter: 'OpenRouter (Fallback)',
+        gemini: 'Google Gemini',
+        local: 'Local Generation',
+        anthropic: 'Anthropic Claude'
       };
       
       const toastResult = toast({
@@ -559,6 +577,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         // Update state
         onNewPaperGenerated(newPaper);
         setLatestPaper(newPaper);
+        try { localStorage.setItem('lastPaper', JSON.stringify(newPaper)); } catch {}
         setShowPreview(true);
       }
     } catch (error) {
@@ -579,6 +598,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       });
     } finally {
       setIsGenerating(false);
+      window.removeEventListener('ai-fallback-warning', fallbackHandler);
     }
   };
 
@@ -754,7 +774,8 @@ ${paper.content}`;
   if (showPreview && latestPaper && !viewingAllPapers) {
     return (
       <QuestionPaperPreview 
-        paper={latestPaper} 
+        paper={latestPaper}
+        apiProvider={apiProvider}
         onBack={() => {
           setShowPreview(false);
           setLatestPaper(null);
@@ -893,36 +914,18 @@ ${paper.content}`;
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openrouter">🤖 OpenRouter - Claude + Free Models (RECOMMENDED)</SelectItem>
-                      <SelectItem value="anthropic">⭐ Anthropic Claude Direct (CORS Issues)</SelectItem>
-                      <SelectItem value="local">💻 Local Generation (Fallback)</SelectItem>
-                      <SelectItem value="gemini">🧠 Google Gemini (Backup)</SelectItem>
-                      <SelectItem value="nvidia">🚀 NVIDIA (CORS Issues)</SelectItem>
+                      <SelectItem value="nvidia">🚀 NVIDIA AI (Llama 3.1 405B)</SelectItem>
+                      <SelectItem value="openrouter">🤖 OpenRouter (Fallback)</SelectItem>
                     </SelectContent>
                   </Select>
-                  {apiProvider === 'anthropic' && (
-                    <p className="text-xs text-red-600">
-                      ⚠️ Anthropic Direct API has CORS issues from browser. Use OpenRouter instead (it proxies Claude for you)!
+                  {apiProvider === 'nvidia' && (
+                    <p className="text-xs text-green-600">
+                      ✅ NVIDIA Llama 3.1 405B - powerful model for accurate question generation.
                     </p>
                   )}
                   {apiProvider === 'openrouter' && (
                     <p className="text-xs text-blue-600">
-                      ℹ️ Will try FREE models first, then Claude. Add payment method at openrouter.ai/settings/billing to use your $100 credits with Claude.
-                    </p>
-                  )}
-                  {apiProvider === 'nvidia' && (
-                    <p className="text-xs text-orange-600">
-                      ⚠️ NVIDIA API has CORS restrictions and cannot be called from browser. Will automatically fall back to local generation.
-                    </p>
-                  )}
-                  {apiProvider === 'gemini' && (
-                    <p className="text-xs text-orange-600">
-                      ⚠️ Gemini has model availability issues. Will fall back to local generation if it fails.
-                    </p>
-                  )}
-                  {apiProvider === 'local' && (
-                    <p className="text-xs text-green-600">
-                      ✅ Local generation extracts actual terms from your PDF and generates relevant questions. For AI-powered generation, try OpenRouter.
+                      ℹ️ OpenRouter fallback - uses free models when available.
                     </p>
                   )}
                 </div>

@@ -1,124 +1,242 @@
-# 🎓 Quizzy AI Paper Forge
+# Quizzy AI Paper Forge
 
-An intelligent question paper generation system for universities and educational institutions.
+**An advanced AI-powered question paper generation system for educational institutions**
 
-## 🚀 Features
+## Key Features
 
-- **AI-Powered Question Generation**: Uses Gemini AI to generate academic questions
-- **PDF Content Analysis**: Extracts content from PDF files and generates relevant questions
-- **Multiple Subject Support**: Handles various subjects including:
-  - Ethical Hacking & Cybersecurity
-  - Physics & Laser Technology
-  - Database Management & SQL
-  - Programming & Software Development
-  - And more...
-- **Intelligent Fallback System**: Generates appropriate questions even when PDF extraction fails
-- **Professional Question Papers**: Creates well-structured papers with multiple parts (A, B, C)
-- **User Authentication**: Secure login system with Supabase
-- **Subject Management**: Create and manage subjects with multiple units
-- **Question Paper History**: Save and retrieve previously generated papers
+- **Multiple AI Providers**: 
+  - **OpenRouter** (Claude 3.5 Haiku) - Primary choice
+  - **NVIDIA Meta LLaMA 3.1 405B** - Most powerful model
+  - **NVIDIA Qwen** - Content analysis specialist
+  - **Google Gemini** - Reliable backup
+  - **Local Generation** - Works without any API keys
 
-## 🛠️ Technology Stack
+- **Advanced PDF Processing**:
+  - Multiple extraction engines (PDF.js, pdf-parse, fallbacks)
+  - Content sanitization and analysis
+  - Key term extraction from PDFs
+  - Intelligent content understanding
 
-- **Frontend**: React + TypeScript + Vite
-- **UI**: Tailwind CSS + shadcn/ui components
-- **Backend**: Supabase (Authentication + Database + Storage)
-- **AI**: Google Gemini AI API
-- **PDF Processing**: PDF.js + Extractor API
+- **Professional Question Paper Generation**:
+  - Bloom's taxonomy integration
+  - Multiple question types (Short, Medium, Long)
+  - Customizable difficulty levels
+  - Subject-specific formatting
+  - Weightage distribution per unit
 
-## 📋 Prerequisites
+- **Secure Authentication**:
+  - Supabase integration
+  - User management system
+  - Secure session handling
+  - Password reset functionality
+
+- **Comprehensive Subject Management**:
+  - Multi-unit support
+  - PDF file organization
+  - Subject metadata tracking
+  - Question paper history
+
+## Technology Stack
+
+- **Frontend**: React 18 + TypeScript + Vite
+- **UI Framework**: Tailwind CSS + shadcn/ui components
+- **Backend**: Supabase (Auth + Database + Storage)
+- **AI Services**: 
+  - OpenRouter API (Multiple models)
+  - NVIDIA NIM API (Meta LLaMA 405B)
+  - Google Gemini API
+  - Local generation fallback
+- **PDF Processing**: PDF.js + pdf-parse + Custom extractors
+- **State Management**: React Query + Context API
+
+## Prerequisites
 
 - Node.js (v18 or higher)
-- npm or yarn
-- Supabase account
-- Google Gemini API key
+- npm or yarn package manager
+- Modern web browser
+- AI API keys (optional - local generation available)
 
-## 🔧 Installation
+## Installation & Setup
 
-1. **Clone the repository**
-   ```bash
-   cd "HTML - Copy/quizzy-ai-paper-forge"
-   ```
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/quizzy-ai-paper-forge.git
+cd quizzy-ai-paper-forge
+```
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+### 2. Install Dependencies
+```bash
+npm install
+```
 
-3. **Configure environment variables**
-   
-   Update `.env.local` with your API keys:
-   ```env
-   VITE_GEMINI_API_KEY=your_gemini_api_key
-   VITE_OPENROUTER_API_KEY=your_openrouter_api_key
-   VITE_EXTRACTOR_API_KEY=your_extractor_api_key
-   ```
+### 3. Environment Configuration
+Create `.env.local` file with your API keys:
 
-4. **Start the development server**
-   ```bash
-   npm run dev
-   ```
+```env
+# Primary AI Provider (Get from: https://openrouter.ai/keys)
+VITE_OPENROUTER_API_KEY=sk-or-v1-your_openrouter_key_here
 
-5. **Open your browser**
-   ```
-   http://localhost:8080
-   ```
+# NVIDIA Meta LLaMA 405B (Get from: https://build.nvidia.com/)
+VITE_NVIDIA_API_KEY=nvapi-your_nvidia_key_here
 
-## 📖 Usage
+# Google Gemini (Get from: https://makersuite.google.com/app/apikey)
+VITE_GEMINI_API_KEY=AIzaSy-your_gemini_key_here
+
+# Supabase (Already configured)
+VITE_SUPABASE_URL=https://tctwiubpfaeskbuqpjfw.supabase.co
+VITE_SUPABASE_ANON_KEY=your_supabase_key_here
+```
+
+### 4. Start Development Server
+```bash
+npm run dev
+```
+
+### 5. Access Application
+Open your browser and navigate to:
+```
+http://localhost:8080
+```
+
+## Usage Guide
 
 ### Creating a Subject
-
-1. Log in to your account
-2. Navigate to "Create Subject"
-3. Fill in subject details:
-   - Subject name
-   - Course code
-   - Exam type
-   - Maximum marks
-   - Number of units
-4. Upload PDF files for each unit
-5. Click "Create Subject"
+1. **Sign Up/Login** to your account
+2. Click **"Create Subject"** from dashboard
+3. **Fill subject details**:
+   - Subject name and code
+   - Exam type and duration
+   - Maximum marks and passing criteria
+   - Number of units/topics
+4. **Upload PDF files** for each unit
+5. **Configure weightage** for each unit
+6. **Save subject** to your library
 
 ### Generating Question Papers
+1. **Select subject** from your dashboard
+2. **Choose units** to include in the paper
+3. **Set weightage** distribution
+4. **Configure paper settings**:
+   - Total marks and duration
+   - Difficulty level (Easy/Medium/Hard)
+   - Question parts and distribution
+   - AI provider preference
+5. **Click "Generate Paper"**
+6. **Review and download** the generated question paper
 
-1. Select a subject from your list
-2. Choose units to include
-3. Set weightage for each unit
-4. Configure question paper settings:
-   - Total marks
-   - Difficulty level
-   - Question types
-5. Click "Generate Question Paper"
-6. Review and download the generated paper
+### AI Provider Options
+- **OpenRouter**: Best overall performance with Claude 3.5 Haiku
+- **NVIDIA Meta LLaMA 405B**: Most powerful model for complex content
+- **Local Generation**: No API required, works offline
 
-## 🎯 How It Works
+## How It Works
 
-1. **PDF Upload**: Users upload PDF files containing study material
-2. **Content Extraction**: System extracts text from PDFs using multiple methods
-3. **AI Analysis**: Gemini AI analyzes the content and identifies key concepts
-4. **Question Generation**: AI generates relevant questions based on the content
-5. **Paper Formatting**: Questions are formatted into a professional paper structure
-6. **Intelligent Fallback**: If PDF extraction fails, system generates questions based on subject context
+### 1. PDF Content Analysis
+- **Multi-engine extraction** for maximum compatibility
+- **Content sanitization** and cleaning
+- **Key term identification** and concept extraction
+- **Semantic analysis** for understanding context
 
-## 🔐 Security
+### 2. AI-Powered Generation
+- **Content analysis** using advanced AI models
+- **Question crafting** based on Bloom's taxonomy
+- **Difficulty calibration** for academic standards
+- **Contextual relevance** to uploaded material
 
-- Secure authentication with Supabase
-- API keys stored in environment variables
-- User data isolation
-- Secure file storage
+### 3. Professional Formatting
+- **Structured paper layout** with proper headings
+- **Mark distribution** across different sections
+- **Academic formatting** standards
+- **Export options** (PDF, Word, Text)
 
-## 🤝 Contributing
+### 4. Intelligent Fallback
+- **Local generation** when APIs fail
+- **Template-based questions** for emergency use
+- **Graceful degradation** for reliability
 
-This is a university project. For any issues or suggestions, please contact the development team.
+## Security Features
 
-## 📄 License
+- **Secure Authentication**: Supabase-based user management
+- **API Key Protection**: Environment variables only
+- **Data Isolation**: User data separation
+- **Secure Storage**: Encrypted file handling
+- **No API Exposure**: Keys hidden from version control
 
-This project is developed for educational purposes.
+## Deployment Options
 
-## 👥 Support
+### GitHub Pages (Free)
+- **Local Generation** mode works without APIs
+- **Static deployment** with GitHub Pages
+- **No server costs** or maintenance
 
-For support and queries, please contact your system administrator.
+### Private Server (Full Features)
+- **All AI providers** available
+- **Custom domain** and branding
+- **Enhanced security** and control
+
+## System Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend     │    │   Supabase     │    │   AI Services  │
+│   (React)      │◄──►│   (Backend)     │◄──►│   (Multiple)    │
+│                │    │                │    │                │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   PDF Upload   │    │   Database     │    │   Question     │
+│   & Processing │    │   & Storage    │    │   Generation   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Performance Features
+
+- **Fast Processing**: Optimized PDF extraction
+- **High Accuracy**: Advanced AI models
+- **Reliable Fallbacks**: Multiple backup systems
+- **Responsive Design**: Works on all devices
+- **Offline Capability**: Local generation option
+
+## Academic Standards
+
+- **Bloom's Taxonomy**: Remember, Understand, Apply, Analyze, Evaluate, Create
+- **Question Types**: Multiple choice, short answer, essay, problem-solving
+- **Difficulty Levels**: Easy, Medium, Hard with appropriate complexity
+- **Mark Distribution**: Fair weightage across topics and difficulty
+
+## Contributing
+
+This is an educational project. For contributions:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is developed for educational purposes under the MIT License.
+
+## Support
+
+For technical support and queries:
+- **Documentation**: Check this README and inline guides
+- **Issues**: Report via GitHub Issues
+- **Community**: Join our development discussions
 
 ---
 
-**Developed for University Question Paper Generation System**
+## **Project Status: Production Ready** 
+
+**Quizzy AI Paper Forge** is fully functional and ready for educational institution deployment with:
+- **Multiple AI providers** with fallback systems
+- **Secure authentication** and data management
+- **Professional question generation** with academic standards
+- **PDF processing** with multiple extraction methods
+- **Production-ready build** with no critical issues
+
+**Perfect for universities, colleges, and educational institutions!** 
+
+---
+
+*Developed with  for educational excellence*

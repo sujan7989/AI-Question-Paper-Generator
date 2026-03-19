@@ -30,7 +30,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFo
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { downloadPaperAsPDF } from "@/lib/paper";
 import { QuestionPaperPreview } from "@/components/QuestionPaperPreview";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 
 type DashboardView = 'overview' | 'subjects' | 'configure' | 'users' | 'analytics';

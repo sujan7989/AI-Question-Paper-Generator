@@ -386,57 +386,66 @@ export async function generatePromptFromSubjectUnits(
   console.log(`📋 Parts configuration: ${partsDescription}`);
   console.log(`📊 Total questions to generate: ${totalQuestionsToGenerate}`);
 
-  const prompt = `You are an expert academic question paper generator. You have been given SPECIFIC CONTENT extracted from a PDF document. Students have ONLY studied this exact content - nothing else.
+  const prompt = `You are a university professor creating an exam question paper. Generate exam-style questions directly from the study material below.
 
 SUBJECT: ${subject.subject_name}
 TOTAL MARKS: ${questionConfig.totalMarks}
 
-PARTS CONFIGURATION (READ CAREFULLY - EXACT QUESTION COUNTS):${partsDescription}
+PARTS CONFIGURATION:${partsDescription}
 
-TOTAL QUESTIONS YOU MUST GENERATE: ${totalQuestionsToGenerate}
+TOTAL QUESTIONS TO GENERATE: ${totalQuestionsToGenerate}
 
-=== EXACT CONTENT FROM PDF (Students studied ONLY this) ===
+=== STUDY MATERIAL ===
 ${contentSections}
-=== END OF PDF CONTENT ===
+=== END OF STUDY MATERIAL ===
 
-CRITICAL INSTRUCTIONS:
-1. Read the PDF content above CAREFULLY - every word matters
-2. YOU MUST GENERATE EXACTLY ${totalQuestionsToGenerate} QUESTIONS TOTAL
-3. Follow the EXACT question counts specified for each part above
-4. Questions MUST be about SPECIFIC topics, terms, definitions, examples, and concepts that appear in the PDF content above
-5. Use EXACT names, terms, and examples from the PDF (e.g., if PDF says "Herbert Simon", use "Herbert Simon")
-6. Reference SPECIFIC definitions or perspectives mentioned (e.g., "Tom Mitchell's 1998 definition")
-7. Ask about SPECIFIC examples described (e.g., "checkers game", "handwritten word recognition")
-8. DO NOT ask generic textbook questions - ask about THIS specific PDF content
+STRICT RULES FOR QUESTION WRITING:
 
-DIFFICULTY LEVELS for each part:
-${questionConfig.parts.map(part => `   - ${part.name}: ${part.difficulty.toUpperCase()} difficulty - ${
-  part.difficulty === 'easy' ? 'Simple recall, definitions, basic concepts' :
-  part.difficulty === 'medium' ? 'Explanations, comparisons, applications' :
-  'Analysis, evaluation, synthesis, complex problem-solving'
+RULE 1 - NEVER reference the source material in questions:
+  WRONG: "What is the definition of learning according to the given text?"
+  WRONG: "As mentioned in the document, what is..."
+  WRONG: "According to the text, explain..."
+  WRONG: "What does the author say about..."
+  RIGHT: "Define machine learning."
+  RIGHT: "What are the three components of a well-defined learning task?"
+  RIGHT: "Explain Tom Mitchell's definition of machine learning."
+
+RULE 2 - Write direct, standalone questions:
+  WRONG: "What is the learning task defined by the example in the text?"
+  RIGHT: "What is the learning task in the checkers game example?"
+  WRONG: "What performance metric is mentioned for handwritten word recognition?"
+  RIGHT: "What performance metric is used to evaluate handwritten word recognition systems?"
+
+RULE 3 - Use specific terms, names, and concepts from the material:
+  - Use exact names (e.g., "Tom Mitchell", "Herbert Simon")
+  - Use exact technical terms from the material
+  - Reference specific examples by name (e.g., "checkers game", "spam detection")
+  - Ask about specific algorithms, methods, or concepts by their proper names
+
+RULE 4 - Match difficulty levels:
+${questionConfig.parts.map(part => `  - ${part.name}: ${part.difficulty.toUpperCase()} - ${
+  part.difficulty === 'easy' ? 'Define, list, state, identify (basic recall)' :
+  part.difficulty === 'medium' ? 'Explain, compare, illustrate, demonstrate (understanding)' :
+  'Analyze, evaluate, design, justify (higher order thinking)'
 }`).join('\n')}
 
-FORBIDDEN - DO NOT DO THIS:
-❌ Generic questions like "What is ${subject.subject_name}?" (too broad)
-❌ Questions not based on the PDF content above
-❌ Phrases like "according to content", "as discussed", "mentioned in", "in the document"
-❌ Vague questions that could apply to any textbook
-❌ Generating fewer questions than specified above
+QUESTION FORMAT (strictly follow this):
+Q[number]. [Direct question without any reference to "text", "document", "given", "mentioned"] | [Bloom's Level] | CO[number]
 
-REQUIRED - DO THIS:
-✅ Use SPECIFIC names from PDF (e.g., "Herbert Simon", "Tom Mitchell")
-✅ Reference SPECIFIC examples from PDF (e.g., "checkers game", "highway driving")
-✅ Use EXACT terminology and definitions from PDF
-✅ Ask about SPECIFIC concepts, methods, or approaches described in PDF
-✅ Generate EXACTLY ${totalQuestionsToGenerate} questions as specified in parts configuration
+CO MAPPING RULES (IMPORTANT - use ONLY CO2, CO3, or CO4):
+- CO2: Basic recall questions (Remember, Understand)
+- CO3: Application questions (Apply, Analyze)  
+- CO4: Higher order questions (Evaluate, Create)
+- NEVER use CO1 - it is reserved for introductory content only
 
-QUESTION FORMAT:
-Q[number]. [Specific question using exact terms/names/examples from PDF] | [Bloom's Level] | [CO number]
+Example of CORRECT questions:
+Q1. Define machine learning. | Remember | CO2
+Q2. Explain the three components of a well-defined learning task. | Understand | CO2
+Q3. What performance measure is used in the checkers game learning problem? | Remember | CO3
+Q4. Compare supervised and unsupervised learning approaches. | Analyze | CO3
+Q5. How does Tom Mitchell's 1998 definition differ from earlier definitions of machine learning? | Analyze | CO4
 
-Bloom's Level must be: Remember, Understand, Apply, Analyze, Evaluate, or Create
-CO number should be: 2, 3, or 4
-
-NOW GENERATE ALL ${totalQuestionsToGenerate} QUESTIONS:
+NOW GENERATE ${totalQuestionsToGenerate} QUESTIONS:
 ${questionConfig.parts.map((part, idx) => {
   const requiredQuestions = part.questions;
   const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
@@ -445,10 +454,11 @@ ${questionConfig.parts.map((part, idx) => {
     return sum + (p.choicesEnabled ? Math.ceil(req * 1.5) : req);
   }, 0) + 1;
   const endNum = startNum + questionsToGenerate - 1;
-  return `\n--- ${part.name.toUpperCase()} (Generate ${questionsToGenerate} questions: Q${startNum} to Q${endNum}) ---`;
+  return `\n--- ${part.name.toUpperCase()} (${questionsToGenerate} questions: Q${startNum} to Q${endNum}, ${part.marks} marks each, ${part.difficulty.toUpperCase()} difficulty) ---`;
 }).join('')}
 
-Generate all ${totalQuestionsToGenerate} questions now using ONLY the specific PDF content above:`;
+Generate all ${totalQuestionsToGenerate} direct exam questions without any reference to "text", "document", "given text", or "mentioned":`;
+
 
   return prompt;
 }

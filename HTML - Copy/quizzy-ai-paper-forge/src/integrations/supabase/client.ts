@@ -47,7 +47,7 @@ export function handleNetworkError(error: any): string {
   }
 
   if (error.message?.includes('Invalid login credentials')) {
-    return 'Invalid email or password. Please check your credentials and try again.';
+    return 'Invalid email or password. Please check your credentials and try again.<br><br><strong>Need an account?</strong> <a href="/auth" style="color: #3b82f6; text-decoration: underline;">Sign up here</a>';
   }
 
   if (error.message?.includes('User not found')) {
