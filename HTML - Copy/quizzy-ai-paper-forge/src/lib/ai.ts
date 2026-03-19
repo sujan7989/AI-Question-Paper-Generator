@@ -158,113 +158,79 @@ function generateQuestionsFromPDFContent(content: string, subject: string, total
 }
 
 /**
- * OpenRouter - full prompt, tries multiple free models with fallback
+ * OpenRouter - full prompt via Vercel proxy (key never exposed to browser)
  */
 async function generateWithOpenRouterAIFullPrompt(fullPrompt: string): Promise<string> {
-  try {
-    const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+  const workingModels = [
+    { model: 'openrouter/auto', maxTokens: 2000 },
+    { model: 'meta-llama/llama-3.3-70b-instruct:free', maxTokens: 2000 },
+    { model: 'mistralai/mistral-small-3.1-24b-instruct:free', maxTokens: 2000 },
+    { model: 'nvidia/nemotron-3-super-120b-a12b:free', maxTokens: 2000 },
+    { model: 'google/gemma-3-27b-it:free', maxTokens: 2000 },
+    { model: 'openai/gpt-oss-120b:free', maxTokens: 2000 },
+    { model: 'qwen/qwen3-next-80b-a3b-instruct:free', maxTokens: 2000 },
+    { model: 'arcee-ai/trinity-large-preview:free', maxTokens: 2000 },
+    { model: 'stepfun/step-3.5-flash:free', maxTokens: 2000 },
+    { model: 'anthropic/claude-3-haiku', maxTokens: 2000 },
+  ];
 
-    if (!apiKey || apiKey.includes('REPLACE') || !apiKey.startsWith('sk-or-v1-')) {
-      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
-      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
-      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
-      const totalMarks = marksMatch ? marksMatch[1] : '100';
-      return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
-    }
+  const proxyUrl = `${window.location.origin}/api/openrouter`;
+  let response = null;
 
-    const workingModels = [
-      { model: 'openrouter/auto', maxTokens: 2000 },
-      { model: 'meta-llama/llama-3.3-70b-instruct:free', maxTokens: 2000 },
-      { model: 'mistralai/mistral-small-3.1-24b-instruct:free', maxTokens: 2000 },
-      { model: 'nvidia/nemotron-3-super-120b-a12b:free', maxTokens: 2000 },
-      { model: 'google/gemma-3-27b-it:free', maxTokens: 2000 },
-      { model: 'openai/gpt-oss-120b:free', maxTokens: 2000 },
-      { model: 'qwen/qwen3-next-80b-a3b-instruct:free', maxTokens: 2000 },
-      { model: 'arcee-ai/trinity-large-preview:free', maxTokens: 2000 },
-      { model: 'stepfun/step-3.5-flash:free', maxTokens: 2000 },
-      { model: 'anthropic/claude-3-haiku', maxTokens: 2000 },
-    ];
+  for (const modelConfig of workingModels) {
+    try {
+      response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelConfig.model,
+          messages: [{ role: 'user', content: fullPrompt }],
+          temperature: 0.7,
+          max_tokens: modelConfig.maxTokens
+        })
+      });
 
-    let response = null;
-    let lastError = null;
+      if (response.ok) break;
 
-    for (const modelConfig of workingModels) {
-      try {
-        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': window.location.origin,
-            'X-Title': 'Quizzy AI Paper Forge'
-          },
-          body: JSON.stringify({
-            model: modelConfig.model,
-            messages: [{ role: 'user', content: fullPrompt }],
-            temperature: 0.7,
-            max_tokens: modelConfig.maxTokens
-          })
-        });
-
-        if (response.ok) break;
-
-        const errorBody = await response.text();
-        if (response.status === 429 || response.status === 404) {
-          lastError = errorBody;
-          response = null;
-          continue;
-        }
-        lastError = `Status ${response.status}: ${errorBody}`;
+      const errorBody = await response.text();
+      if (response.status === 429 || response.status === 404 || response.status === 500) {
         response = null;
-      } catch (error) {
-        lastError = error;
-        response = null;
+        continue;
       }
+      response = null;
+    } catch (error) {
+      response = null;
     }
+  }
 
-    if (!response) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ai-fallback-warning', {
-          detail: { message: 'All AI providers are busy (rate limited). Using local generation — question quality may be lower. Try again in a minute.' }
-        }));
-      }
-      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
-      const subject = subjectMatch ? subjectMatch[1].trim() : 'Subject';
-      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
-      const totalMarks = marksMatch ? marksMatch[1] : '100';
-      return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
+  if (!response) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ai-fallback-warning', {
+        detail: { message: 'All AI providers are busy (rate limited). Using local generation — question quality may be lower. Try again in a minute.' }
+      }));
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content;
-  } catch (error) {
     const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
-    const subject = subjectMatch ? subjectMatch[1] : 'Subject';
+    const subject = subjectMatch ? subjectMatch[1].trim() : 'Subject';
     const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
     const totalMarks = marksMatch ? marksMatch[1] : '100';
     return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
   }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
 }
 
 /**
- * Gemini - full prompt
+ * Gemini - full prompt via Vercel proxy (key never exposed to browser)
  */
 async function generateWithGeminiAIFullPrompt(fullPrompt: string): Promise<string> {
   try {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-    if (!apiKey || apiKey.includes('REPLACE')) {
-      const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
-      const subject = subjectMatch ? subjectMatch[1] : 'Subject';
-      const marksMatch = fullPrompt.match(/TOTAL MARKS:\s*(\d+)/);
-      const totalMarks = marksMatch ? marksMatch[1] : '100';
-      return generateQuestionsFromPDFContent(fullPrompt, subject, totalMarks);
-    }
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+    const proxyUrl = `${window.location.origin}/api/gemini`;
+    const response = await fetch(proxyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        model: 'gemini-pro',
         contents: [{ parts: [{ text: fullPrompt }] }],
         generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
       })
@@ -276,9 +242,8 @@ async function generateWithGeminiAIFullPrompt(fullPrompt: string): Promise<strin
         return data.candidates[0].content.parts[0].text;
       }
       throw new Error('Unexpected Gemini response format');
-    } else {
-      throw new Error(`Gemini API failed: ${response.status}`);
     }
+    throw new Error(`Gemini proxy failed: ${response.status}`);
   } catch (error) {
     const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
     const subject = subjectMatch ? subjectMatch[1] : 'Subject';
@@ -289,18 +254,11 @@ async function generateWithGeminiAIFullPrompt(fullPrompt: string): Promise<strin
 }
 
 /**
- * NVIDIA NIM - full prompt via Vercel proxy
+ * NVIDIA NIM - full prompt via Vercel proxy (key never exposed to browser)
  */
 async function generateWithNvidiaAIFullPrompt(fullPrompt: string): Promise<string> {
   try {
-    const apiKey = import.meta.env.VITE_NVIDIA_API_KEY;
-
-    if (!apiKey || apiKey.includes('REPLACE')) {
-      return await generateWithOpenRouterAIFullPrompt(fullPrompt);
-    }
-
     const proxyUrl = `${window.location.origin}/api/nvidia`;
-
     const response = await fetch(proxyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -317,32 +275,22 @@ async function generateWithNvidiaAIFullPrompt(fullPrompt: string): Promise<strin
     if (response.ok) {
       const data = await response.json();
       return data.choices[0].message.content;
-    } else {
-      return await generateWithOpenRouterAIFullPrompt(fullPrompt);
     }
+    return await generateWithOpenRouterAIFullPrompt(fullPrompt);
   } catch (error) {
     return await generateWithOpenRouterAIFullPrompt(fullPrompt);
   }
 }
 
 /**
- * Anthropic Claude - full prompt
+ * Anthropic Claude - full prompt via Vercel proxy (key never exposed to browser)
  */
 async function generateWithAnthropicAIFullPrompt(fullPrompt: string): Promise<string> {
   try {
-    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-
-    if (!apiKey || apiKey.includes('your-anthropic-key-here')) {
-      throw new Error('Anthropic API key not configured.');
-    }
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const proxyUrl = `${window.location.origin}/api/anthropic`;
+    const response = await fetch(proxyUrl, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-3-5-haiku-20241022',
         max_tokens: 4096,
@@ -353,10 +301,8 @@ async function generateWithAnthropicAIFullPrompt(fullPrompt: string): Promise<st
     if (response.ok) {
       const data = await response.json();
       return data.content[0].text;
-    } else {
-      const errorBody = await response.text();
-      throw new Error(`Anthropic API failed: ${response.status} - ${errorBody}`);
     }
+    throw new Error(`Anthropic proxy failed: ${response.status}`);
   } catch (error) {
     const subjectMatch = fullPrompt.match(/SUBJECT:\s*([^\n]+)/);
     const subject = subjectMatch ? subjectMatch[1] : 'Subject';
@@ -367,7 +313,7 @@ async function generateWithAnthropicAIFullPrompt(fullPrompt: string): Promise<st
 }
 
 /**
- * NVIDIA - from PDF files
+ * NVIDIA - from PDF files via Vercel proxy (key never exposed to browser)
  */
 async function generateWithNvidiaAIFromPDFs(
   pdfFiles: Array<{ unitName: string; file: File; weightage: number }>,
@@ -375,9 +321,6 @@ async function generateWithNvidiaAIFromPDFs(
   totalMarks: number,
   questionConfig: any
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_NVIDIA_API_KEY;
-  if (!apiKey || apiKey.includes('REPLACE')) throw new Error('NVIDIA API key not configured');
-
   const { extractRealPDFContent } = await import('./pdf-extractor-real');
   let combinedContent = '';
   for (const pdfFile of pdfFiles) {
@@ -390,9 +333,10 @@ async function generateWithNvidiaAIFromPDFs(
 
   const aiPrompt = `You are an expert university professor. Create a comprehensive academic question paper based EXCLUSIVELY on the following PDF content.\n\nSubject: ${subjectName}\nTotal Marks: ${totalMarks}\n\nPDF CONTENT:\n${combinedContent.substring(0, 15000)}\n\nGenerate the question paper now.`;
 
-  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+  const proxyUrl = `${window.location.origin}/api/nvidia`;
+  const response = await fetch(proxyUrl, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'meta/llama-3.1-405b-instruct',
       messages: [{ role: 'user', content: aiPrompt }],
@@ -405,11 +349,11 @@ async function generateWithNvidiaAIFromPDFs(
     const data = await response.json();
     return data.choices[0].message.content;
   }
-  throw new Error(`NVIDIA API failed: ${response.status}`);
+  throw new Error(`NVIDIA proxy failed: ${response.status}`);
 }
 
 /**
- * Gemini - from PDF files
+ * Gemini - from PDF files via Vercel proxy (key never exposed to browser)
  */
 async function generateWithGeminiAIFromPDFs(
   pdfFiles: Array<{ unitName: string; file: File; weightage: number }>,
@@ -417,44 +361,39 @@ async function generateWithGeminiAIFromPDFs(
   totalMarks: number,
   questionConfig: any
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey.includes('REPLACE')) throw new Error('Gemini API key not configured');
-
-  const uploadedFiles = [];
+  // Gemini file upload requires direct API access with key — extract text and send via proxy instead
+  const { extractRealPDFContent } = await import('./pdf-extractor-real');
+  let combinedContent = '';
   for (const pdfFile of pdfFiles) {
-    const formData = new FormData();
-    formData.append('file', pdfFile.file);
-    const uploadResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
-      method: 'POST', body: formData
-    });
-    if (uploadResponse.ok) {
-      const uploadData = await uploadResponse.json();
-      uploadedFiles.push({ uri: uploadData.file.uri, unitName: pdfFile.unitName, weightage: pdfFile.weightage });
+    const extraction = await extractRealPDFContent(pdfFile.file);
+    if (extraction.success && extraction.text) {
+      combinedContent += `\n\n=== ${pdfFile.unitName} (${pdfFile.weightage}% weightage) ===\n${extraction.text}`;
     }
   }
-  if (uploadedFiles.length === 0) throw new Error('Failed to upload PDFs to Gemini');
+  if (combinedContent.length < 100) throw new Error('Failed to extract content from PDFs');
 
-  const prompt = `Create a comprehensive academic question paper for "${subjectName}" (${totalMarks} marks) based EXCLUSIVELY on the uploaded PDF documents.`;
-  const parts: any[] = [{ text: prompt }];
-  uploadedFiles.forEach(file => {
-    parts.push({ fileData: { fileUri: file.uri, mimeType: 'application/pdf' } });
-  });
+  const prompt = `Create a comprehensive academic question paper for "${subjectName}" (${totalMarks} marks) based EXCLUSIVELY on the following PDF content:\n\n${combinedContent.substring(0, 15000)}`;
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+  const proxyUrl = `${window.location.origin}/api/gemini`;
+  const response = await fetch(proxyUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts }] })
+    body: JSON.stringify({
+      model: 'gemini-pro',
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
+    })
   });
 
   if (response.ok) {
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
   }
-  throw new Error(`Gemini API failed: ${response.status}`);
+  throw new Error(`Gemini proxy failed: ${response.status}`);
 }
 
 /**
- * OpenRouter - from PDF files
+ * OpenRouter - from PDF files via Vercel proxy (key never exposed to browser)
  */
 async function generateWithOpenRouterAIFromPDFs(
   pdfFiles: Array<{ unitName: string; file: File; weightage: number }>,
@@ -462,9 +401,6 @@ async function generateWithOpenRouterAIFromPDFs(
   totalMarks: number,
   questionConfig: any
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
-  if (!apiKey || apiKey.includes('REPLACE')) throw new Error('OpenRouter API key not configured');
-
   const { extractRealPDFContent } = await import('./pdf-extractor-real');
   let combinedContent = '';
   for (const pdfFile of pdfFiles) {
@@ -477,17 +413,21 @@ async function generateWithOpenRouterAIFromPDFs(
 
   const aiPrompt = `Create a comprehensive academic question paper based on this PDF content:\n\nSubject: ${subjectName}\nTotal Marks: ${totalMarks}\n\nCONTENT: ${combinedContent.substring(0, 10000)}`;
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const proxyUrl = `${window.location.origin}/api/openrouter`;
+  const response = await fetch(proxyUrl, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'anthropic/claude-3-haiku', messages: [{ role: 'user', content: aiPrompt }] })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'anthropic/claude-3-haiku',
+      messages: [{ role: 'user', content: aiPrompt }]
+    })
   });
 
   if (response.ok) {
     const data = await response.json();
     return data.choices[0].message.content;
   }
-  throw new Error('OpenRouter API failed');
+  throw new Error('OpenRouter proxy failed');
 }
 
 /**

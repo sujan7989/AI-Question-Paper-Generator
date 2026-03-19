@@ -155,10 +155,8 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   };
 
   const calculateTotalWeightage = (weights: { [key: string]: number }) => {
-    // Only calculate for selected units to avoid counting placeholder units
     const selectedWeights = selectedUnits.map(unitId => Number(weights[unitId]) || 0);
     const total = selectedWeights.reduce((sum, weight) => sum + weight, 0);
-    console.log(`Selected units: ${selectedUnits.length}, Weights: [${selectedWeights.join(', ')}], Total: ${total}`);
     return total;
   };
 
@@ -282,50 +280,24 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       }
 
       // Find the selected subject
-      console.log('🔍 DEBUG: Finding selected subject with ID:', selectedSubjectId);
       const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
       if (!selectedSubject) {
-        console.error('❌ DEBUG: Subject not found!');
         throw new Error('Selected subject not found');
       }
-      console.log('✅ DEBUG: Subject found:', selectedSubject.subject_name);
 
       if (!selectedSubject.units || selectedSubject.units.length === 0) {
-        console.error('❌ DEBUG: No units found in subject');
         throw new Error('Selected subject has no units. Please ensure the subject was created with PDF content.');
       }
-      console.log(`✅ DEBUG: Found ${selectedSubject.units.length} units in subject`);
-
-      // Debug each unit
-      selectedSubject.units.forEach((unit, idx) => {
-        console.log(`📄 DEBUG Unit ${idx + 1}: ${unit.unit_name}`);
-        console.log(`   - ID: ${unit.id}`);
-        console.log(`   - Selected: ${selectedUnits.includes(unit.id)}`);
-        console.log(`   - Has extracted_content: ${!!unit.extracted_content}`);
-        if (unit.extracted_content) {
-          const content = unit.extracted_content as any;
-          console.log(`   - Content text length: ${content.text?.length || 0}`);
-          console.log(`   - Content preview: ${content.text?.substring(0, 100) || 'NO TEXT'}...`);
-        }
-      });
 
       // Check if selected units have extracted content
       const selectedUnitsWithContent = selectedSubject.units.filter(unit => 
         selectedUnits.includes(unit.id) && unit.extracted_content?.text
       );
 
-      console.log(`🔍 DEBUG: Selected units: ${selectedUnits.length}`);
-      console.log(`🔍 DEBUG: Selected units with content: ${selectedUnitsWithContent.length}`);
-
       if (selectedUnitsWithContent.length === 0) {
-        console.error('❌ DEBUG: No units with extracted PDF content!');
-        console.error('💡 DEBUG: Please ensure PDFs were uploaded during subject creation');
         throw new Error('No units with extracted content found. Please ensure PDFs were uploaded and processed correctly.');
       }
-      
-      console.log('✅ DEBUG: All validation passed, proceeding with question generation...');
 
-      // Use extracted content from database (avoids SSL certificate issues)
       const questionConfig = {
         totalQuestions: getTotalQuestions(),
         totalMarks,
@@ -333,114 +305,44 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         parts
       };
 
-      console.log('📄 DEBUG: Using extracted PDF content from database...');
-      
       // Get extracted content from selected units
       const relevantUnits = selectedSubject.units.filter(unit => selectedUnits.includes(unit.id));
-      
       let combinedContent = '';
       
-      // Process each unit and force extraction if needed
       for (const unit of relevantUnits) {
         const weightage = unitWeightages[unit.id] || 0;
         
-        console.log(`🔍 Processing unit: ${unit.unit_name}`);
-        console.log(`   - Has extracted_content: ${!!unit.extracted_content}`);
-        console.log(`   - Content length: ${unit.extracted_content?.text?.length || 0}`);
-        console.log(`   - File URL: ${unit.file_url || 'NONE'}`);
-        
         if (unit.extracted_content?.text && unit.extracted_content.text.length > 100) {
-          // Content exists and is good
           combinedContent += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n${unit.extracted_content.text}`;
-          console.log(`✅ Using existing content from ${unit.unit_name}: ${unit.extracted_content.text.length} chars`);
-          console.log(`📖 Content preview: ${unit.extracted_content.text.substring(0, 150)}...`);
-        } else {
-          // No content or too short - try to extract now
-          console.warn(`⚠️ No extracted content for ${unit.unit_name} - attempting extraction now...`);
-          
-          if (unit.file_url) {
+        } else if (unit.file_url) {
             try {
-              console.log(`📥 Downloading PDF from: ${unit.file_url}`);
+              const { data: fileData, error: downloadError } = await supabase
+                .storage.from('syllabus-files').download(unit.file_url);
               
-              // Download PDF from Supabase
-              const { data: fileData, error: downloadError } = await supabase.storage
-                .from('syllabus-files')
-                .download(unit.file_url);
+              if (downloadError) throw downloadError;
+              if (!fileData) throw new Error('No file data received');
               
-              if (downloadError) {
-                console.error(`❌ Download error for ${unit.unit_name}:`, downloadError);
-                throw downloadError;
-              }
-              
-              if (!fileData) {
-                console.error(`❌ No file data received for ${unit.unit_name}`);
-                throw new Error('No file data received');
-              }
-              
-              console.log(`✅ Downloaded PDF for ${unit.unit_name} (${fileData.size} bytes)`);
-              
-              // Extract text from PDF
               const pdfFile = new File([fileData], `${unit.unit_name}.pdf`, { type: 'application/pdf' });
               const { extractRealPDFContent } = await import('@/lib/pdf-extractor-real');
               const extraction = await extractRealPDFContent(pdfFile);
               
-              console.log(`📄 Extraction result for ${unit.unit_name}:`, {
-                success: extraction.success,
-                textLength: extraction.text?.length || 0,
-                numPages: extraction.numPages,
-                error: extraction.error
-              });
-              
               if (extraction.success && extraction.text.length > 100) {
                 combinedContent += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n${extraction.text}`;
-                console.log(`✅ EXTRACTED NOW: ${extraction.text.length} chars from ${unit.unit_name}`);
-                console.log(`📖 Content preview: ${extraction.text.substring(0, 150)}...`);
-                
-                // Save to database for future use
-                const { error: updateError } = await supabase
-                  .from('units')
-                  .update({
-                    extracted_content: {
-                      text: extraction.text,
-                      numPages: extraction.numPages
-                    }
-                  })
-                  .eq('id', unit.id);
-                
-                if (updateError) {
-                  console.error(`⚠️ Failed to save extracted content to database:`, updateError);
-                } else {
-                  console.log(`💾 Saved extracted content to database for ${unit.unit_name}`);
-                }
-              } else {
-                console.error(`❌ Extraction failed for ${unit.unit_name}:`, extraction.error || 'Text too short');
+                await supabase.from('units').update({
+                  extracted_content: { text: extraction.text, numPages: extraction.numPages }
+                }).eq('id', unit.id);
               }
             } catch (error) {
-              console.error(`❌ Failed to extract PDF for ${unit.unit_name}:`, error);
+              // Skip unit if extraction fails
             }
-          } else {
-            console.error(`❌ No file URL for ${unit.unit_name}`);
-          }
         }
       }
 
       if (combinedContent.length < 100) {
-        console.error('❌ CRITICAL: Combined content is too short!');
-        console.error(`   - Content length: ${combinedContent.length}`);
-        console.error(`   - Selected units: ${selectedUnits.length}`);
-        console.error(`   - Relevant units: ${relevantUnits.length}`);
         throw new Error('No PDF content found for selected units. Please ensure PDFs were uploaded during subject creation. Try re-uploading your PDFs.');
       }
 
-      console.log('═══════════════════════════════════════════════');
-      console.log('📚 GENERATING PROPER PROMPT WITH PARTS CONFIG');
-      console.log('═══════════════════════════════════════════════');
-      console.log(`📊 Total questions needed: ${getTotalQuestions()}`);
-      console.log(`📋 Parts configuration:`, parts);
-      console.log(`🤖 API provider: ${apiProvider}`);
-      console.log('═══════════════════════════════════════════════');
-
-      // Use the proper prompt generator from subject-manager
+      // Generate prompt and questions
       const { generatePromptFromSubjectUnits } = await import('@/lib/subject-manager');
       const prompt = await generatePromptFromSubjectUnits(
         selectedSubject,
@@ -449,23 +351,12 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         questionConfig
       );
 
-      console.log('🚀 Generated proper prompt with parts configuration');
-      console.log(`📝 Prompt length: ${prompt.length} characters`);
-      console.log(`📖 Prompt preview (first 800 chars):`);
-      console.log(prompt.substring(0, 800));
-      console.log('═══════════════════════════════════════════════');
-
       const { generateQuestions } = await import('@/lib/ai');
       const generatedQuestions = await generateQuestions(apiProvider, prompt);
       
-      console.log('✅ DEBUG: Questions generated successfully');
-      console.log('📋 DEBUG: Generated questions length:', generatedQuestions.length);
-      console.log('📖 DEBUG: Generated questions preview (first 1000 chars):');
-      console.log(generatedQuestions.substring(0, 1000));
       const subjectName = selectedSubject.subject_name;
 
       if (!generatedQuestions || generatedQuestions.trim() === '') {
-        console.error('❌ AI returned empty response');
         throw new Error("The AI failed to generate questions. Please try a different provider or adjust your settings.");
       }
       
@@ -547,16 +438,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
           paper_config: newPaper.config,
         });
 
-      console.log('Saving paper to database:', {
-        user_id: user?.id,
-        subject_id: selectedSubjectId,
-        paper_title: `${selectedSubject.subject_name} Question Paper`,
-        total_marks: totalMarks,
-        total_questions: getTotalQuestions(),
-      });
-
       if (dbError) {
-        console.error('Database save error:', dbError);
         toast({
           title: "Save Failed",
           description: "Couldn't save to database. Your paper was generated but not saved.",
@@ -581,7 +463,6 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         setShowPreview(true);
       }
     } catch (error) {
-      console.error('Error generating questions:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       
       // Dismiss loading toast if it exists

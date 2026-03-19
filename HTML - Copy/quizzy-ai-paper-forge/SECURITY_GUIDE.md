@@ -37,9 +37,9 @@ Added these lines to prevent API key exposure:
 Create `.env.local` file with your actual API keys:
 ```env
 # Your real API keys (this file won't be pushed to GitHub)
-VITE_OPENROUTER_API_KEY=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
-VITE_NVIDIA_API_KEY=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
-VITE_GEMINI_API_KEY=AIzaSyBpejf1OkN80FDwmq42Rv80XurIQmtfcTA
+VITE_OPENROUTER_API_KEY=sk-or-v1-YOUR_OPENROUTER_KEY_HERE
+VITE_NVIDIA_API_KEY=nvapi-YOUR_NVIDIA_KEY_HERE
+VITE_GEMINI_API_KEY=AIzaSyYOUR_GEMINI_KEY_HERE
 ```
 
 ### **Step 2: Verify Security**
@@ -63,17 +63,17 @@ git push origin main
 
 ### **OpenRouter API Key:**
 ```
-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
+sk-or-v1-YOUR_OPENROUTER_KEY_HERE
 ```
 
 ### **NVIDIA Meta LLaMA 405B API Key:**
 ```
-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
+nvapi-YOUR_NVIDIA_KEY_HERE
 ```
 
 ### **Google Gemini API Key:**
 ```
-AIzaSyBpejf1OkN80FDwmq42Rv80XurIQmtfcTA
+AIzaSyYOUR_GEMINI_KEY_HERE
 ```
 
 ---

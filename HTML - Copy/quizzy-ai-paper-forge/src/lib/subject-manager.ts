@@ -100,22 +100,14 @@ export async function createSubjectWithUnits(
               title: unit.name,
               subject: unit.name
             };
-            console.log(`✅ Real PDF extraction successful for ${unit.name}: ${realExtraction.text.length} chars`);
           } else {
-            console.warn(`⚠️ Real PDF extraction failed for ${unit.name}, trying fallback...`);
             extractedContent = await extractPDFContent(unit.pdfFile);
           }
           
         } catch (error) {
-          console.warn(`Failed to process PDF for unit ${i + 1}:`, error);
+          // PDF processing failed silently, unit saved without content
         }
       }
-
-      console.log(`💾 Saving unit to database:`, {
-        unit_name: unit.name,
-        has_extracted_content: !!extractedContent,
-        content_length: extractedContent?.text?.length || 0
-      });
 
       const { data: unitData, error: unitError} = await supabase
         .from('units')
@@ -131,12 +123,8 @@ export async function createSubjectWithUnits(
         .single();
       
       if (unitError) {
-        console.error(`❌ Database error saving unit:`, unitError);
-      } else {
-        console.log(`✅ Unit saved to database:`, unitData.id);
+        throw unitError;
       }
-
-      if (unitError) throw unitError;
 
       units.push({
         ...unitData,
@@ -152,7 +140,6 @@ export async function createSubjectWithUnits(
     };
 
   } catch (error) {
-    console.error('Error creating subject:', error);
     throw error;
   }
 }
@@ -176,7 +163,6 @@ export async function getUserSubjects(userId: string): Promise<Subject[]> {
     return subjects || [];
 
   } catch (error) {
-    console.error('Error fetching user subjects:', error);
     return [];
   }
 }
@@ -211,10 +197,9 @@ export async function getPDFFilesForUnits(
             file: pdfFile,
             weightage: unit.weightage
           });
-          console.log(`✅ Retrieved PDF for ${unit.unit_name}`);
         }
       } catch (error) {
-        console.error(`❌ Failed to retrieve PDF for ${unit.unit_name}:`, error);
+        // Failed to retrieve PDF for unit
       }
     }
   }
@@ -236,11 +221,6 @@ export async function generatePromptFromSubjectUnits(
     parts: Array<{ name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean }>;
   }
 ): Promise<string> {
-  console.log('🎯🎯🎯 generatePromptFromSubjectUnits CALLED 🎯🎯🎯');
-  console.log('📚 Subject:', subject.subject_name);
-  console.log('📊 Selected units:', selectedUnits);
-  console.log('📋 Subject units available:', subject.units?.length || 0);
-  
   if (!subject.units) {
     throw new Error('Subject has no units');
   }
@@ -249,124 +229,64 @@ export async function generatePromptFromSubjectUnits(
     selectedUnits.includes(unit.id)
   );
 
-  console.log('✅ Relevant units found:', relevantUnits.length);
-
   if (relevantUnits.length === 0) {
     throw new Error('No units selected');
   }
 
   let contentSections = '';
   
-  // Process units sequentially to allow async operations
   for (const unit of relevantUnits) {
     const weightage = unitWeightages[unit.id] || 0;
-    console.log(`\n📖📖📖 Processing unit: ${unit.unit_name} (${weightage}% weightage) 📖📖📖`);
     
     contentSections += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n`;
     
     let actualContent = '';
     
-    // FORCE PDF EXTRACTION FIRST - Don't use fallback until we try extraction
-    let pdfExtractionAttempted = false;
-    
     if (!unit.extracted_content?.text || unit.extracted_content.text.length < 100) {
-      console.error(`❌ NO PDF CONTENT IN DATABASE FOR: ${unit.unit_name}`);
-      
-      // MANDATORY: Try to extract PDF content if file URL exists
       if (unit.file_url) {
-        console.log(`🚨 MANDATORY EXTRACTION: Downloading and extracting PDF...`);
-        console.log(`📂 File URL: ${unit.file_url}`);
-        pdfExtractionAttempted = true;
-        
         try {
-          // Download PDF from Supabase
           const { data: fileData, error: downloadError } = await supabase.storage
             .from('syllabus-files')
             .download(unit.file_url);
           
-          if (downloadError) {
-            console.error(`❌ Supabase download error:`, downloadError);
-            throw downloadError;
-          }
+          if (downloadError) throw downloadError;
           
           if (fileData) {
-            console.log(`📥 Downloaded PDF file (${fileData.size} bytes)`);
-            
-            // Convert Blob to File
             const pdfFile = new File([fileData], unit.unit_name + '.pdf', { type: 'application/pdf' });
-            
             const { extractRealPDFContent } = await import('./pdf-extractor-real');
             const extraction = await extractRealPDFContent(pdfFile);
             
             if (extraction.success && extraction.text.length > 100) {
               actualContent = extraction.text;
-              console.log(`✅ EXTRACTION SUCCESS: ${actualContent.length} chars`);
-              console.log(`📖 Content preview: ${actualContent.substring(0, 200)}...`);
-              
-              // Update database
               await supabase
                 .from('units')
-                .update({
-                  extracted_content: {
-                    text: extraction.text,
-                    numPages: extraction.numPages
-                  }
-                })
+                .update({ extracted_content: { text: extraction.text, numPages: extraction.numPages } })
                 .eq('id', unit.id);
-              
-              console.log(`💾 Saved to database`);
             } else {
-              console.error(`❌ Extraction returned no content`);
               actualContent = generateRealisticContent(unit.unit_name);
             }
           } else {
-            console.error(`❌ No file data received`);
             actualContent = generateRealisticContent(unit.unit_name);
           }
         } catch (emergencyError) {
-          console.error(`❌ Extraction failed:`, emergencyError);
           actualContent = generateRealisticContent(unit.unit_name);
         }
       } else {
-        console.error(`❌ No file URL - cannot extract PDF`);
         actualContent = generateRealisticContent(unit.unit_name);
       }
     } else {
-      // Content exists in database
       actualContent = unit.extracted_content.text;
-      console.log(`✅ USING STORED PDF CONTENT: ${actualContent.length} chars`);
-      console.log(`📝 Content preview: ${actualContent.substring(0, 300)}...`);
     }
     
-    // CRITICAL CHECK: Log what content we're actually using
-    console.log(`📊 FINAL CONTENT CHECK for ${unit.unit_name}:`);
-    console.log(`   - actualContent length: ${actualContent.length}`);
-    console.log(`   - actualContent preview: ${actualContent.substring(0, 100)}...`);
-    console.log(`   - file_url: ${unit.file_url || 'NONE'}`);
-    
-    const maxLength = Math.floor((weightage / 100) * 2000); // Reduced from 3000 to 2000 for API limits
+    // Give each unit up to 6000 chars — much better context for AI
+    const maxLength = Math.floor((weightage / 100) * 6000);
     const content = actualContent.length > maxLength 
       ? actualContent.substring(0, maxLength) + '...'
       : actualContent;
     
-    console.log(`   - Final content length (after truncation): ${content.length}`);
-    
-    // ALWAYS add file URL if available for direct PDF processing
-    if (unit.file_url) {
-      contentSections += `\n[PDF_FILE] file_url: ${unit.file_url}\n`;
-      console.log(`   - ✅ Added file URL to prompt for direct PDF processing`);
-    } else {
-      console.log(`   - ⚠️ No file URL available for this unit`);
-    }
-    
     contentSections += content;
   }
   
-  // CRITICAL: Log the final prompt content
-  console.log(`🎯 FINAL PROMPT CONTENT SECTIONS LENGTH: ${contentSections.length} characters`);
-  console.log(`📝 Content sections preview: ${contentSections.substring(0, 200)}...`);
-  
-  // Build parts description from user configuration with EXPLICIT question counts
   let partsDescription = '';
   let totalQuestionsToGenerate = 0;
   
@@ -382,9 +302,6 @@ export async function generatePromptFromSubjectUnits(
     
     partsDescription += `\n${part.name.toUpperCase()} - ${part.marks} marks [DIFFICULTY: ${difficultyLabel}]${choiceInfo}`;
   });
-  
-  console.log(`📋 Parts configuration: ${partsDescription}`);
-  console.log(`📊 Total questions to generate: ${totalQuestionsToGenerate}`);
 
   const prompt = `You are a university professor creating an exam question paper. Generate exam-style questions directly from the study material below.
 
