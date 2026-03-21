@@ -283,12 +283,14 @@ export function Analytics() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Generation Time</CardTitle>
+            <CardTitle className="text-sm font-medium">Avg Papers / Subject</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2.3s</div>
-            <p className="text-xs text-muted-foreground">Average AI processing time</p>
+            <div className="text-2xl font-bold">
+                    {subjects.length > 0 ? (generatedPapers.length / subjects.length).toFixed(1) : '0'}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Avg papers per subject</p>
           </CardContent>
         </Card>
       </div>
@@ -302,16 +304,27 @@ export function Analytics() {
             </CardTitle>
             <CardDescription>Subjects by exam type</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             {Object.keys(subjectsByExamType).length > 0 ? (
-              Object.entries(subjectsByExamType).map(([type, count]) => (
-                <div key={type} className="flex items-center justify-between py-1">
-                  <span className="font-medium capitalize">{type}</span>
-                  <Badge variant="outline">{count} subjects</Badge>
-                </div>
-              ))
+              Object.entries(subjectsByExamType).map(([type, count]) => {
+                const pct = Math.round((count / totalSubjects) * 100);
+                return (
+                  <div key={type} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium capitalize truncate max-w-[70%]">{type}</span>
+                      <span className="text-muted-foreground">{count} ({pct}%)</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                      <div className="h-2 rounded-full bg-primary transition-all duration-700" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })
             ) : (
-              <p className="text-muted-foreground text-sm">No subjects found</p>
+              <div className="text-center py-6 text-muted-foreground">
+                <div className="text-3xl mb-2">📚</div>
+                <p className="text-sm">No subjects yet</p>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -324,16 +337,28 @@ export function Analytics() {
             </CardTitle>
             <CardDescription>Generated papers by difficulty level</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             {Object.keys(papersByDifficulty).length > 0 ? (
-              Object.entries(papersByDifficulty).map(([difficulty, count]) => (
-                <div key={difficulty} className="flex items-center justify-between py-1">
-                  <span className="font-medium capitalize">{difficulty}</span>
-                  <Badge>{count} papers</Badge>
-                </div>
-              ))
+              Object.entries(papersByDifficulty).map(([difficulty, count]) => {
+                const pct = Math.round((count / totalPapers) * 100);
+                const colors: Record<string, string> = { easy: 'bg-green-500', medium: 'bg-yellow-500', hard: 'bg-red-500' };
+                return (
+                  <div key={difficulty} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium capitalize">{difficulty}</span>
+                      <span className="text-muted-foreground">{count} papers ({pct}%)</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                      <div className={`h-2 rounded-full transition-all duration-700 ${colors[difficulty] || 'bg-primary'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })
             ) : (
-              <p className="text-muted-foreground text-sm">No papers found</p>
+              <div className="text-center py-6 text-muted-foreground">
+                <div className="text-3xl mb-2">📄</div>
+                <p className="text-sm">No papers yet</p>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -344,16 +369,44 @@ export function Analytics() {
               <TrendingUp className="w-5 h-5 mr-2" />
               System Performance
             </CardTitle>
-            <CardDescription>AI generation metrics</CardDescription>
+            <CardDescription>Usage metrics</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Success Rate</span>
-              <Badge variant="default">98.5%</Badge>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>Papers per Subject</span>
+                <span className="font-bold">{totalSubjects > 0 ? (totalPapers / totalSubjects).toFixed(1) : '0'}</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div className="h-2 rounded-full bg-blue-500 transition-all duration-700" style={{
+                  width: `${Math.min(100, totalSubjects > 0 ? Math.round((totalPapers / totalSubjects) * 10) : 0)}%`
+                }} />
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Avg Processing Time</span>
-              <Badge variant="secondary">2.3s</Badge>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>Units with PDFs</span>
+                <span className="font-bold">
+                  {(() => {
+                    const totalUnits = subjects.reduce((sum, s) => sum + (s.units?.length || 0), 0);
+                    const unitsWithPDF = subjects.reduce((sum, s) => sum + (s.units?.filter((u: any) => u.extracted_content?.text)?.length || 0), 0);
+                    return `${unitsWithPDF}/${totalUnits}`;
+                  })()}
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div className="h-2 rounded-full bg-green-500 transition-all duration-700" style={{
+                  width: (() => {
+                    const totalUnits = subjects.reduce((sum, s) => sum + (s.units?.length || 0), 0);
+                    const unitsWithPDF = subjects.reduce((sum, s) => sum + (s.units?.filter((u: any) => u.extracted_content?.text)?.length || 0), 0);
+                    return totalUnits > 0 ? `${Math.round((unitsWithPDF / totalUnits) * 100)}%` : '0%';
+                  })()
+                }} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t">
+              <span className="text-sm">AI Engine</span>
+              <Badge variant="default" className="bg-green-500">Online</Badge>
             </div>
           </CardContent>
         </Card>

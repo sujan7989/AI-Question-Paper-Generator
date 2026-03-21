@@ -1,153 +1,138 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Eye, EyeClosed } from 'lucide-react';
+import { Eye, EyeOff, Lock, GraduationCap, CheckCircle, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export const ResetPassword = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [done, setDone] = useState(false);
   const [searchParams] = useSearchParams();
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [refreshToken, setRefreshToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract tokens from URL if present (handles email confirmation or password reset)
     const token = searchParams.get('token');
     const type = searchParams.get('type');
-    const next = searchParams.get('next') || '/profile';
-
-    if (token && type === 'recovery') {
-      // This is a password reset flow
-      setAccessToken(token);
-      setRefreshToken(searchParams.get('refresh_token'));
+    const refreshToken = searchParams.get('refresh_token');
+    if (token && type === 'recovery' && refreshToken) {
+      supabase.auth.setSession({ access_token: token, refresh_token: refreshToken });
     }
   }, [searchParams]);
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setMessage(null);
-
     if (password !== confirmPassword) {
-      setMessage({ type: 'error', text: 'Passwords do not match' });
-      setLoading(false);
+      toast({ title: "Passwords don't match", variant: 'destructive' });
       return;
     }
-
+    if (password.length < 6) {
+      toast({ title: "Password too short", description: "Minimum 6 characters.", variant: 'destructive' });
+      return;
+    }
+    setLoading(true);
     try {
-      if (accessToken && refreshToken) {
-        // This is a password reset flow
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-
-        if (error) throw error;
-      }
-
-      const { error } = await supabase.auth.updateUser({
-        password,
-      });
-
+      const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-
-      setMessage({
-        type: 'success',
-        text: 'Your password has been updated successfully!',
-      });
+      setDone(true);
+      toast({ title: "Password updated!", description: "You can now sign in with your new password." });
+      setTimeout(() => navigate('/auth'), 2500);
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.message });
+      toast({ title: "Failed", description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-6 text-center">Reset Your Password</h2>
-      {message ? (
-        <div className={`mb-4 p-3 rounded ${message.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-          {message.text}
-        </div>
-      ) : (
-        <form onSubmit={handleResetPassword} className="space-y-4">
-          <div>
-             <div className="relative">
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">New Password</label>
-             <div className="relative">
-            <input
-              id="password"
-                type={showPassword? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-              style={{ color: 'black' }}
-              required
-            />
-             <button
-                type="button"
-                onClick={() =>  setShowPassword(!showPassword) }
-                className="absolute inset-y-0 right-0 flex items-center pr-3"
-              >
-                { showPassword === true ?(
-                  <Eye className="h-5 w-5 text-gray-400"   />
-                ) :
-                (
-                  <EyeClosed className="h-5 w-5 text-gray-400"  />
-                )
-                }
-              </button>
-              </div>
-          </div>
-          </div>
-          <div className="relative">
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">Confirm New Password</label>
-            <div className="relative">
-              <input
-                id="confirmPassword"
-                type={showPassword? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                style={{ color: "black" }}
-                required
-              />
-              {/* <button
-                type="button"
-                onClick={() =>  setShowPassword(!showPassword) }
-                className="absolute inset-y-0 right-0 flex items-center pr-3"
-              >
-                { showPassword === true ?(
-                  <Eye className="h-5 w-5 text-gray-400"   />
-
-                ) :
-                (
-
-                  <EyeClosed className="h-5 w-5 text-gray-400"  />
-
-                )
-
-                }
-              </button> */}
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-4"
+      style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2563eb 50%, #1e40af 100%)' }}
+    >
+      <div className="w-full max-w-md space-y-4">
+        {/* Branding */}
+        <div className="text-center space-y-2">
+          <div className="flex items-center justify-center gap-2">
+            <div className="bg-white/20 rounded-xl p-2">
+              <GraduationCap className="h-8 w-8 text-white" />
             </div>
+            <span className="text-2xl font-bold text-white drop-shadow">QuestionCraft AI</span>
           </div>
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-            >
-              {loading ? 'Updating...' : 'Update Password'}
-            </button>
-          </div>
-        </form>
-      )}
+          <p className="text-white/80 text-sm">Set your new password</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-2xl border border-gray-200 p-6 space-y-5" style={{ colorScheme: 'light' }}>
+          {done ? (
+            <div className="text-center space-y-4 py-4">
+              <CheckCircle className="w-14 h-14 text-green-500 mx-auto" />
+              <h2 className="text-xl font-bold text-gray-900">Password Updated!</h2>
+              <p className="text-gray-600 text-sm">Redirecting you to login...</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 pb-1">
+                <Lock className="w-5 h-5 text-gray-700" />
+                <h2 className="text-xl font-bold text-gray-900">Reset Password</h2>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-gray-800 font-semibold">New Password</Label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      required
+                      className="pr-10 text-gray-900 bg-white border-gray-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-gray-800 font-semibold">Confirm Password</Label>
+                  <div className="relative">
+                    <Input
+                      type={showConfirm ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm new password"
+                      required
+                      className="pr-10 text-gray-900 bg-white border-gray-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirm(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    >
+                      {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold" disabled={loading}>
+                  {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Updating...</> : 'Update Password'}
+                </Button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

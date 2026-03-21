@@ -483,50 +483,6 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
     }
   };
 
-  const downloadPaperAsPDF = (paper: QuestionPaper) => {
-    try {
-      // Ensure we have content to download
-      if (!paper || !paper.content) {
-        toast({
-          title: "Download Failed",
-          description: "Paper content is missing",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Format the content nicely
-      const formattedContent = `# ${paper.subjectName} Question Paper
-Generated on: ${paper.generatedAt.toLocaleDateString()}
-
-${paper.content}`;
-
-      // Create and trigger download
-      const blob = new Blob([formattedContent], { type: 'text/plain;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${paper.subjectName.replace(/\s+/g, '_')}_Question_Paper.txt`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      toast({
-        title: "Download Started",
-        description: "Your question paper is being downloaded",
-        variant: "default",
-      });
-    } catch (error) {
-      console.error('Download error:', error);
-      toast({
-        title: "Download Failed",
-        description: "Failed to download the question paper",
-        variant: "destructive",
-      });
-    }
-  };
-
 
 
   // Add a download button to the recent papers card
@@ -745,6 +701,30 @@ ${paper.content}`;
                 )}
               </div>
 
+              {/* Subject Info Preview */}
+              {selectedSubject && (
+                <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <p className="font-semibold text-sm">{selectedSubject.subject_name}</p>
+                      <p className="text-xs text-muted-foreground">{selectedSubject.course_code} · {selectedSubject.exam_type}</p>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full font-medium">{selectedSubject.maximum_marks} marks</span>
+                      <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full font-medium">{selectedSubject.units?.length || 0} units</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {selectedSubject.units?.map((unit: any) => (
+                      <div key={unit.id} className={`text-xs p-2 rounded border flex items-center gap-1.5 ${unit.extracted_content?.text ? 'border-green-300 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400' : 'border-orange-300 bg-orange-50 dark:bg-orange-900/20 text-orange-700'}`}>
+                        <CheckCircle className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{unit.unit_name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Common Configuration */}
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -789,26 +769,11 @@ ${paper.content}`;
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="apiProvider">AI Provider</Label>
-                  <Select value={apiProvider} onValueChange={(value: ApiProvider) => setApiProvider(value)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nvidia">🚀 NVIDIA AI (Llama 3.1 405B)</SelectItem>
-                      <SelectItem value="openrouter">🤖 OpenRouter (Fallback)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {apiProvider === 'nvidia' && (
-                    <p className="text-xs text-green-600">
-                      ✅ NVIDIA Llama 3.1 405B - powerful model for accurate question generation.
-                    </p>
-                  )}
-                  {apiProvider === 'openrouter' && (
-                    <p className="text-xs text-blue-600">
-                      ℹ️ OpenRouter fallback - uses free models when available.
-                    </p>
-                  )}
+                  <Label>AI Engine</Label>
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                    <span className="text-green-600 text-sm">🚀</span>
+                    <span className="text-sm font-medium text-green-700 dark:text-green-400">NVIDIA AI (Llama 3.1 405B) — Auto with fallback</span>
+                  </div>
                 </div>
               </div>
 

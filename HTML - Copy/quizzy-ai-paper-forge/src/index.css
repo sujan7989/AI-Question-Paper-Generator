@@ -281,3 +281,108 @@
 .animate-wave {
   animation: wave ease-in-out infinite;
 }
+
+/* View transition fade-slide */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeSlideOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+.view-enter {
+  animation: fadeSlideIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--muted-foreground)/0.1) 50%, hsl(var(--muted)) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+/* Confetti particle */
+@keyframes confettiFall {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+.confetti-particle {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  animation: confettiFall linear forwards;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Button micro-interaction */
+.btn-micro {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.btn-micro:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsl(var(--primary)/0.25);
+}
+.btn-micro:active {
+  transform: translateY(0px);
+}
+
+/* GeneratingAnimation — scale-in entrance */
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* GeneratingAnimation — float for particles */
+@keyframes floatParticle {
+  0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.6; }
+  50%       { transform: translateY(-18px) rotate(180deg); opacity: 1; }
+}
+.animate-float {
+  animation: floatParticle ease-in-out infinite;
+}
+
+/* Mobile nav */
+@media (max-width: 768px) {
+  .desktop-nav {
+    display: none;
+  }
+  .mobile-nav-open .desktop-nav {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 56px;
+    left: 0;
+    right: 0;
+    background: hsl(var(--background));
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 8px;
+    z-index: 50;
+    gap: 4px;
+  }
+}

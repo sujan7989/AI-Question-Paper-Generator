@@ -24,12 +24,15 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
   useEffect(() => {
     if (!isGenerating) return;
 
-    // Animate dots
+    // Lock body scroll
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+
     const dotsInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    // Animate progress
     const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 100) return 100;
@@ -37,12 +40,15 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
       });
     }, 200);
 
-    // Animate steps
     const stepInterval = setInterval(() => {
       setStepIndex(prev => (prev + 1) % steps.length);
     }, 1500);
 
     return () => {
+      // Restore scroll
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
       clearInterval(dotsInterval);
       clearInterval(progressInterval);
       clearInterval(stepInterval);
@@ -51,6 +57,9 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
 
   useEffect(() => {
     if (!isGenerating) {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
       setProgress(0);
       setStepIndex(0);
       setDots('');
@@ -60,9 +69,25 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
   if (!isGenerating) return null;
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-slate-900/95 via-purple-900/95 to-slate-900/95 backdrop-blur-md z-50 flex items-center justify-center">
-      {/* Floating particles background */}
-      <div className="absolute inset-0 overflow-hidden">
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, rgba(15,23,42,0.97) 0%, rgba(88,28,135,0.97) 50%, rgba(15,23,42,0.97) 100%)',
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      {/* Floating particles */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
         {Array.from({ length: 20 }).map((_, i) => (
           <div
             key={i}
@@ -77,8 +102,8 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
         ))}
       </div>
       
-      <Card className="w-[480px] max-w-md mx-4 bg-white/10 backdrop-blur-xl border-white/20 shadow-2xl animate-scale-in">
-        <CardContent className="p-10 text-center space-y-8">
+      <Card className="w-full max-w-md mx-4 bg-white/10 backdrop-blur-xl border-white/20 shadow-2xl animate-scale-in relative">
+        <CardContent className="p-6 sm:p-10 text-center space-y-5 sm:space-y-8">
           {/* Enhanced AI Brain Icon with Multiple Animations */}
           <div className="relative">
             {/* Outer glow ring */}
@@ -88,8 +113,8 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
             <div className="absolute inset-2 border-2 border-gradient-to-r from-cyan-400 to-purple-500 rounded-full animate-spin-slow opacity-40"></div>
             
             {/* Main icon container */}
-            <div className="relative bg-gradient-to-br from-cyan-400 via-blue-500 via-purple-500 to-pink-500 rounded-full p-6 w-28 h-28 mx-auto flex items-center justify-center shadow-2xl animate-float">
-              <Brain className="w-14 h-14 text-white animate-pulse" />
+            <div className="relative bg-gradient-to-br from-cyan-400 via-blue-500 via-purple-500 to-pink-500 rounded-full p-4 sm:p-6 w-20 h-20 sm:w-28 sm:h-28 mx-auto flex items-center justify-center shadow-2xl animate-float">
+              <Brain className="w-10 h-10 sm:w-14 sm:h-14 text-white animate-pulse" />
             </div>
             
             {/* Floating sparkles */}
@@ -106,7 +131,7 @@ export function GeneratingAnimation({ isGenerating, currentStep = "Generating qu
 
           {/* Enhanced Title */}
           <div className="space-y-4">
-            <h3 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-gradient">
+            <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-gradient">
               🤖 AI Question Paper Generation
             </h3>
             <div className="flex items-center justify-center space-x-3 p-4 bg-white/5 rounded-xl border border-white/10">

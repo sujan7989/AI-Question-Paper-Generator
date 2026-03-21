@@ -174,7 +174,24 @@ export function ForgotPassword() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-4"
+      style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2563eb 50%, #1e40af 100%)' }}
+    >
+      <div className="w-full max-w-md space-y-4">
+        {/* Branding */}
+        <div className="text-center space-y-2">
+          <div className="flex items-center justify-center gap-2">
+            <div className="bg-white/20 rounded-xl p-2">
+              <Lock className="h-8 w-8 text-white" />
+            </div>
+            <span className="text-2xl font-bold text-white drop-shadow">QuestionCraft AI</span>
+          </div>
+          <p className="text-white/80 text-sm">Password recovery</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-2xl border border-gray-200" style={{ colorScheme: 'light' }}>
+    <Card className="w-full border-0 shadow-none bg-transparent">
       <CardHeader className="space-y-1">
         <div className="flex items-center justify-center mb-4">
           <div className="p-3 bg-primary/10 rounded-full">
@@ -183,12 +200,12 @@ export function ForgotPassword() {
             {step === 'password' && <Lock className="h-6 w-6 text-primary" />}
           </div>
         </div>
-        <CardTitle className="text-2xl text-center">
+        <CardTitle className="text-2xl text-center text-gray-900">
           {step === 'email' && 'Forgot Password?'}
           {step === 'otp' && 'Verify OTP'}
           {step === 'password' && 'Set New Password'}
         </CardTitle>
-        <CardDescription className="text-center">
+        <CardDescription className="text-center text-gray-600">
           {step === 'email' && 'Enter your email to receive a verification code'}
           {step === 'otp' && `Enter the 6-digit code sent to ${email}`}
           {step === 'password' && 'Create a new password for your account'}
@@ -199,7 +216,7 @@ export function ForgotPassword() {
         {step === 'email' && (
           <form onSubmit={handleSendOTP} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
+              <Label htmlFor="email" className="text-gray-800 font-semibold">Email Address</Label>
               <Input
                 id="email"
                 type="email"
@@ -207,6 +224,7 @@ export function ForgotPassword() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="text-gray-900 bg-white border-gray-300 placeholder:text-gray-400"
               />
             </div>
 
@@ -307,5 +325,8 @@ export function ForgotPassword() {
         )}
       </CardContent>
     </Card>
+        </div>
+      </div>
+    </div>
   );
 }

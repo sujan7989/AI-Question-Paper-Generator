@@ -42,7 +42,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Faster fallback mechanism to prevent infinite loading
   useEffect(() => {
     const fallbackTimeout = setTimeout(() => {
-      console.log('Auth fallback: forcing loading to false after 4 seconds');
       setLoading(false);
     }, 4000); // Reduced from 6 to 4 seconds
 
@@ -59,7 +58,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Set a shorter timeout to prevent hanging
         timeoutId = setTimeout(() => {
           if (mounted) {
-            console.log('Auth initialization timeout - forcing loading to false');
             setLoading(false);
           }
         }, 3000); // Reduced from 4 to 3 seconds
@@ -83,8 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             initialSession = session;
           }
         } catch (error) {
-          console.log('Session fetch timeout - continuing without session');
-          // Continue without session - user will need to sign in
+          // Session fetch timeout - continue without session
         }
 
         if (mounted) {
@@ -132,8 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error('Error fetching profile:', error);
           }
         } catch (error) {
-          console.log('Profile fetch timeout - continuing without profile');
-          // Continue without profile - user can still use the app
+          // Profile fetch timeout - continue without profile
         }
       } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -188,8 +184,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: new Error("No internet connection") };
       }
 
-      console.log('🔐 Signing up with OTP verification...');
-      
       // Sign up user account
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -210,8 +204,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error };
       }
 
-      console.log('✅ Account created! OTP sent to email.');
-      
       toast({
         title: "Account Created! 🎉",
         description: "Please check your email for the 6-digit OTP code to verify your account.",
@@ -233,8 +225,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Verify OTP code
   const verifyOTP = useCallback(async (email: string, otp: string) => {
     try {
-      console.log('🔐 Verifying OTP for:', email);
-      
       const { data, error } = await supabase.auth.verifyOtp({
         email,
         token: otp,
@@ -251,7 +241,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error };
       }
 
-      console.log('✅ OTP verified successfully!');
       toast({
         title: "Account Verified! 🎉",
         description: "Your account has been verified successfully. You can now use the app.",
@@ -273,8 +262,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Resend OTP code
   const resendOTP = useCallback(async (email: string) => {
     try {
-      console.log('📧 Resending OTP to:', email);
-      
       const { error } = await supabase.auth.signInWithOtp({
         email: email,
         options: {
@@ -304,7 +291,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error };
       }
 
-      console.log('✅ OTP resent successfully!');
       toast({
         title: "OTP Resent! 📧",
         description: "A new OTP code has been sent to your email.",
@@ -408,8 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: new Error("Invalid email format") };
       }
       
-      // Use a hardcoded redirect URL to ensure it works
-      const redirectUrl = 'http://localhost:8080/updatepassword';
+      const redirectUrl = `${window.location.origin}/reset-password`;
       
       const result = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl,
@@ -457,8 +442,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      console.log('Attempting to sign out user');
-      
       const { error } = await supabase.auth.signOut();
       
       if (error && error.message !== 'Auth session missing!') {
@@ -537,90 +520,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   }, [user, toast]);
 
-  const updateUserPassword = useCallback(async (email: string, newPassword: string) => {
-    try {
-      // Check network connectivity first
-      const isOnline = await checkNetworkStatus();
-      if (!isOnline) {
-        toast({
-          title: "Network Error",
-          description: "Please check your internet connection and try again.",
-          variant: "destructive",
-        });
-        return { error: new Error("No internet connection") };
-      }
-
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        toast({
-          title: "Invalid Email",
-          description: "Please enter a valid email address.",
-          variant: "destructive",
-        });
-        return { error: new Error("Invalid email format") };
-      }
-      
-      // First, try to sign in to verify the user exists
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email,
-        password: 'temp-password-for-verification'
-      });
-
-      if (signInError && signInError.message.includes('Invalid login credentials')) {
-        // User exists, now send reset email
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: 'http://localhost:8080/reset-password',
-        });
-
-        if (error) {
-          console.error('Password reset error:', error);
-          const errorMessage = handleNetworkError(error);
-          const errorTitle = error.message?.includes('User not found') 
-            ? "Account Not Found"
-            : error.message?.includes('Too many requests') 
-            ? "Rate Limited"
-            : error.message?.includes('Failed to fetch') 
-            ? "Network Error"
-            : error.message?.includes('timeout') 
-            ? "Timeout Error"
-            : error.message?.includes('TypeError') 
-            ? "Connection Error"
-            : "Reset Failed";
-          
-          toast({
-            title: errorTitle,
-            description: errorMessage,
-            variant: "destructive",
-          });
-          return { error };
-        } else {
-          toast({
-            title: "Reset Link Sent",
-            description: "Check your email for the password reset link. It may take a few minutes to arrive.",
-          });
-          return { error: null };
-        }
-      } else {
-        // User doesn't exist
-        toast({
-          title: "Account Not Found",
-          description: "No account found with this email address.",
-          variant: "destructive",
-        });
-        return { error: new Error("Account not found") };
-      }
-    } catch (error: any) {
-      console.error('Unexpected error during password update:', error);
-      const errorMessage = handleNetworkError(error);
-      toast({
-        title: "Unexpected Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-      return { error: error };
-    }
-  }, [toast]);
+  const updateUserPassword = useCallback(async (email: string, _newPassword: string) => {
+    // Delegates to resetPassword — sends a secure reset link via email
+    return resetPassword(email);
+  }, [resetPassword]);
 
   // Memoized context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
