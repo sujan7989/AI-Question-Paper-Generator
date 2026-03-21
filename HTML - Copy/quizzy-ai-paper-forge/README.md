@@ -1,242 +1,138 @@
 # Quizzy AI Paper Forge
 
-**An advanced AI-powered question paper generation system for educational institutions**
+An AI-powered academic question paper generator for universities and colleges. Upload your syllabus PDFs, configure your paper structure, and get a professionally formatted question paper in seconds.
 
-## Key Features
+🔗 **Live Demo**: [quizzy-ai-paper-forge.vercel.app](https://quizzy-ai-paper-forge.vercel.app)
 
-- **Multiple AI Providers**: 
-  - **OpenRouter** (Claude 3.5 Haiku) - Primary choice
-  - **NVIDIA Meta LLaMA 3.1 405B** - Most powerful model
-  - **NVIDIA Qwen** - Content analysis specialist
-  - **Google Gemini** - Reliable backup
-  - **Local Generation** - Works without any API keys
+---
 
-- **Advanced PDF Processing**:
-  - Multiple extraction engines (PDF.js, pdf-parse, fallbacks)
-  - Content sanitization and analysis
-  - Key term extraction from PDFs
-  - Intelligent content understanding
+## Features
 
-- **Professional Question Paper Generation**:
-  - Bloom's taxonomy integration
-  - Multiple question types (Short, Medium, Long)
-  - Customizable difficulty levels
-  - Subject-specific formatting
-  - Weightage distribution per unit
+- **AI Question Generation** — powered by NVIDIA LLaMA 3.1 405B, OpenRouter (Claude, Mistral, Gemma), Google Gemini, and Anthropic Claude
+- **PDF Syllabus Upload** — upload unit-wise PDFs; AI reads and generates questions directly from your content
+- **Kalasalingam University Format** — generates papers with proper header, registration number box, Part A/B/C structure, choice-enabled sections
+- **Bloom's Taxonomy** — questions tagged with cognitive levels (Remember, Understand, Apply, Analyze, Evaluate, Create)
+- **Answer Key** — auto-generated answer key alongside the question paper
+- **Export Options** — download as PDF or Word document
+- **Secure Authentication** — Supabase-based login, signup, OTP verification, password reset
+- **Subject Management** — save subjects with unit PDFs and reuse them for future papers
+- **Local Fallback** — generates questions without any API key if all providers fail
 
-- **Secure Authentication**:
-  - Supabase integration
-  - User management system
-  - Secure session handling
-  - Password reset functionality
+---
 
-- **Comprehensive Subject Management**:
-  - Multi-unit support
-  - PDF file organization
-  - Subject metadata tracking
-  - Question paper history
+## Tech Stack
 
-## Technology Stack
+| Layer | Technology |
+|---|---|
+| Frontend | React 18 + TypeScript + Vite |
+| UI | Tailwind CSS + shadcn/ui |
+| Auth & DB | Supabase |
+| AI Providers | NVIDIA NIM, OpenRouter, Gemini, Anthropic |
+| PDF Processing | PDF.js + custom extractors |
+| Deployment | Vercel (serverless functions for API proxying) |
 
-- **Frontend**: React 18 + TypeScript + Vite
-- **UI Framework**: Tailwind CSS + shadcn/ui components
-- **Backend**: Supabase (Auth + Database + Storage)
-- **AI Services**: 
-  - OpenRouter API (Multiple models)
-  - NVIDIA NIM API (Meta LLaMA 405B)
-  - Google Gemini API
-  - Local generation fallback
-- **PDF Processing**: PDF.js + pdf-parse + Custom extractors
-- **State Management**: React Query + Context API
+---
 
-## Prerequisites
+## Security
 
-- Node.js (v18 or higher)
-- npm or yarn package manager
-- Modern web browser
-- AI API keys (optional - local generation available)
+All API keys are stored as **Vercel environment variables** and accessed only through serverless proxy functions (`/api/*.js`). The frontend bundle contains **zero API keys** — nothing is exposed to the browser or visible in source code.
 
-## Installation & Setup
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/yourusername/quizzy-ai-paper-forge.git
-cd quizzy-ai-paper-forge
+```
+Browser → /api/nvidia.js (Vercel) → NVIDIA API
+Browser → /api/openrouter.js (Vercel) → OpenRouter API
+Browser → /api/gemini.js (Vercel) → Gemini API
+Browser → /api/anthropic.js (Vercel) → Anthropic API
 ```
 
-### 2. Install Dependencies
+---
+
+## Local Setup
+
+### 1. Clone and install
+
 ```bash
+git clone https://github.com/YOUR_USERNAME/quizzy-ai-paper-forge.git
+cd quizzy-ai-paper-forge
 npm install
 ```
 
-### 3. Environment Configuration
-Create `.env.local` file with your API keys:
+### 2. Configure environment
 
-```env
-# Primary AI Provider (Get from: https://openrouter.ai/keys)
-VITE_OPENROUTER_API_KEY=sk-or-v1-your_openrouter_key_here
-
-# NVIDIA Meta LLaMA 405B (Get from: https://build.nvidia.com/)
-VITE_NVIDIA_API_KEY=nvapi-your_nvidia_key_here
-
-# Google Gemini (Get from: https://makersuite.google.com/app/apikey)
-VITE_GEMINI_API_KEY=AIzaSy-your_gemini_key_here
-
-# Supabase (Already configured)
-VITE_SUPABASE_URL=https://tctwiubpfaeskbuqpjfw.supabase.co
-VITE_SUPABASE_ANON_KEY=your_supabase_key_here
+```bash
+cp .env.example .env.local
 ```
 
-### 4. Start Development Server
+Edit `.env.local` and add your API keys:
+
+```env
+VITE_NVIDIA_API_KEY=nvapi-...
+VITE_OPENROUTER_API_KEY=sk-or-v1-...
+VITE_GEMINI_API_KEY=AIzaSy...
+VITE_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Get keys from:
+- NVIDIA: [build.nvidia.com](https://build.nvidia.com)
+- OpenRouter: [openrouter.ai/keys](https://openrouter.ai/keys)
+- Gemini: [aistudio.google.com](https://aistudio.google.com/app/apikey)
+- Anthropic: [console.anthropic.com](https://console.anthropic.com)
+
+### 3. Run
+
 ```bash
 npm run dev
 ```
 
-### 5. Access Application
-Open your browser and navigate to:
-```
-http://localhost:8080
-```
+Open `http://localhost:5173`
 
-## Usage Guide
+---
 
-### Creating a Subject
-1. **Sign Up/Login** to your account
-2. Click **"Create Subject"** from dashboard
-3. **Fill subject details**:
-   - Subject name and code
-   - Exam type and duration
-   - Maximum marks and passing criteria
-   - Number of units/topics
-4. **Upload PDF files** for each unit
-5. **Configure weightage** for each unit
-6. **Save subject** to your library
+## Deploying to Vercel
 
-### Generating Question Papers
-1. **Select subject** from your dashboard
-2. **Choose units** to include in the paper
-3. **Set weightage** distribution
-4. **Configure paper settings**:
-   - Total marks and duration
-   - Difficulty level (Easy/Medium/Hard)
-   - Question parts and distribution
-   - AI provider preference
-5. **Click "Generate Paper"**
-6. **Review and download** the generated question paper
-
-### AI Provider Options
-- **OpenRouter**: Best overall performance with Claude 3.5 Haiku
-- **NVIDIA Meta LLaMA 405B**: Most powerful model for complex content
-- **Local Generation**: No API required, works offline
-
-## How It Works
-
-### 1. PDF Content Analysis
-- **Multi-engine extraction** for maximum compatibility
-- **Content sanitization** and cleaning
-- **Key term identification** and concept extraction
-- **Semantic analysis** for understanding context
-
-### 2. AI-Powered Generation
-- **Content analysis** using advanced AI models
-- **Question crafting** based on Bloom's taxonomy
-- **Difficulty calibration** for academic standards
-- **Contextual relevance** to uploaded material
-
-### 3. Professional Formatting
-- **Structured paper layout** with proper headings
-- **Mark distribution** across different sections
-- **Academic formatting** standards
-- **Export options** (PDF, Word, Text)
-
-### 4. Intelligent Fallback
-- **Local generation** when APIs fail
-- **Template-based questions** for emergency use
-- **Graceful degradation** for reliability
-
-## Security Features
-
-- **Secure Authentication**: Supabase-based user management
-- **API Key Protection**: Environment variables only
-- **Data Isolation**: User data separation
-- **Secure Storage**: Encrypted file handling
-- **No API Exposure**: Keys hidden from version control
-
-## Deployment Options
-
-### GitHub Pages (Free)
-- **Local Generation** mode works without APIs
-- **Static deployment** with GitHub Pages
-- **No server costs** or maintenance
-
-### Private Server (Full Features)
-- **All AI providers** available
-- **Custom domain** and branding
-- **Enhanced security** and control
-
-## System Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend     │    │   Supabase     │    │   AI Services  │
-│   (React)      │◄──►│   (Backend)     │◄──►│   (Multiple)    │
-│                │    │                │    │                │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   PDF Upload   │    │   Database     │    │   Question     │
-│   & Processing │    │   & Storage    │    │   Generation   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+```bash
+npx vercel --prod
 ```
 
-## Performance Features
+Add your API keys in Vercel dashboard → Project Settings → Environment Variables. The serverless proxy functions will pick them up automatically.
 
-- **Fast Processing**: Optimized PDF extraction
-- **High Accuracy**: Advanced AI models
-- **Reliable Fallbacks**: Multiple backup systems
-- **Responsive Design**: Works on all devices
-- **Offline Capability**: Local generation option
+---
 
-## Academic Standards
+## How to Use
 
-- **Bloom's Taxonomy**: Remember, Understand, Apply, Analyze, Evaluate, Create
-- **Question Types**: Multiple choice, short answer, essay, problem-solving
-- **Difficulty Levels**: Easy, Medium, Hard with appropriate complexity
-- **Mark Distribution**: Fair weightage across topics and difficulty
+1. **Sign up / Log in**
+2. **Create a subject** — add subject name, code, units, and upload a PDF for each unit
+3. **Go to Dashboard** → select your subject → click Generate Paper
+4. **Configure the paper** — set total marks, difficulty, parts, AI provider
+5. **Generate** — AI reads your PDFs and produces a formatted question paper
+6. **Download** as PDF or Word
 
-## Contributing
+---
 
-This is an educational project. For contributions:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+## Project Structure
+
+```
+src/
+├── components/         # React UI components
+│   ├── auth/           # Login, signup, OTP, password reset
+│   ├── ui/             # shadcn/ui base components
+│   ├── Dashboard.tsx
+│   ├── QuestionPaperConfig.tsx
+│   ├── QuestionPaperPreview.tsx
+│   └── SubjectSetup.tsx
+├── lib/
+│   ├── ai.ts           # All AI provider calls (via proxies)
+│   ├── paper.ts        # HTML paper generation + formatting
+│   ├── subject-manager.ts  # Subject/unit/PDF management
+│   └── pdf-extractor-real.ts  # PDF text extraction
+api/
+├── nvidia.js           # NVIDIA NIM proxy
+├── openrouter.js       # OpenRouter proxy
+├── gemini.js           # Gemini proxy
+└── anthropic.js        # Anthropic proxy
+```
+
+---
 
 ## License
 
-This project is developed for educational purposes under the MIT License.
-
-## Support
-
-For technical support and queries:
-- **Documentation**: Check this README and inline guides
-- **Issues**: Report via GitHub Issues
-- **Community**: Join our development discussions
-
----
-
-## **Project Status: Production Ready** 
-
-**Quizzy AI Paper Forge** is fully functional and ready for educational institution deployment with:
-- **Multiple AI providers** with fallback systems
-- **Secure authentication** and data management
-- **Professional question generation** with academic standards
-- **PDF processing** with multiple extraction methods
-- **Production-ready build** with no critical issues
-
-**Perfect for universities, colleges, and educational institutions!** 
-
----
-
-*Developed with  for educational excellence*
+MIT — free to use for educational purposes.

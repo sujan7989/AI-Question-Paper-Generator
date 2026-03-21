@@ -31,7 +31,7 @@ const UpdatePassword = () => {
 
       setSuccess(true);
       setTimeout(() => {
-        navigate('/login');
+        navigate('/auth');
       }, 2000);
     } catch (error: any) {
       setError(error.message);
