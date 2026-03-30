@@ -235,34 +235,33 @@ export async function generatePromptFromSubjectUnits(
 
   let contentSections = '';
   
+  // Smart content extraction: take key sentences from each unit, not raw dump
+  // Cap at 4000 chars total so the AI has enough output budget for all questions
+  const totalContentBudget = 4000;
+  const perUnitBudget = Math.floor(totalContentBudget / Math.max(relevantUnits.length, 1));
+
   for (const unit of relevantUnits) {
     const weightage = unitWeightages[unit.id] || 0;
-    
-    contentSections += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n`;
-    
+    contentSections += `\n\n=== ${unit.unit_name} (${weightage}%) ===\n`;
+
     let actualContent = '';
-    
+
     if (!unit.extracted_content?.text || unit.extracted_content.text.length < 100) {
       if (unit.file_url) {
         try {
           const { data: fileData, error: downloadError } = await supabase.storage
             .from('syllabus-files')
             .download(unit.file_url);
-          
           if (downloadError) throw downloadError;
-          
           if (fileData) {
             const pdfFile = new File([fileData], unit.unit_name + '.pdf', { type: 'application/pdf' });
             const { extractRealPDFContent } = await import('./pdf-extractor-real');
             const extraction = await extractRealPDFContent(pdfFile);
-            
             if (extraction.success && extraction.text.length > 100) {
               actualContent = extraction.text;
-              // Cache it back to DB so next time it's instant
-              await supabase
-                .from('units')
-                .update({ extracted_content: { text: extraction.text, numPages: extraction.numPages } })
-                .eq('id', unit.id);
+              await supabase.from('units').update({
+                extracted_content: { text: extraction.text, numPages: extraction.numPages }
+              }).eq('id', unit.id);
             } else {
               throw new Error(`Could not extract text from the PDF for "${unit.unit_name}". The PDF may be image-based or scanned. Please re-upload a text-based PDF.`);
             }
@@ -270,7 +269,6 @@ export async function generatePromptFromSubjectUnits(
             throw new Error(`Could not download the PDF for "${unit.unit_name}". Please re-upload the PDF in Subject Setup.`);
           }
         } catch (emergencyError: any) {
-          // Re-throw with clear message — never silently use fake content
           throw new Error(emergencyError?.message || `Failed to load PDF content for "${unit.unit_name}". Please re-upload the PDF.`);
         }
       } else {
@@ -279,94 +277,92 @@ export async function generatePromptFromSubjectUnits(
     } else {
       actualContent = unit.extracted_content.text;
     }
-    
-    // Give each unit proportional content — minimum 3000 chars, max 8000 chars per unit
-    // Never truncate below 3000 chars regardless of weightage
-    const minLength = 3000;
-    const maxLength = Math.max(minLength, Math.floor((weightage / 100) * 12000));
-    const content = actualContent.length > maxLength 
-      ? actualContent.substring(0, maxLength) + '...[content continues]'
-      : actualContent;
-    
-    contentSections += content;
+
+    // Extract the most informative sentences — definitions, key terms, headings
+    const extracted = extractKeyContent(actualContent, perUnitBudget);
+    contentSections += extracted;
   }
   
-  let partsDescription = '';
   let totalQuestionsToGenerate = 0;
-  
   questionConfig.parts.forEach(part => {
-    const difficultyLabel = part.difficulty.toUpperCase();
-    const requiredQuestions = part.questions;
-    const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
+    const questionsToGenerate = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
     totalQuestionsToGenerate += questionsToGenerate;
-    
-    const choiceInfo = part.choicesEnabled 
-      ? ` [GENERATE ${questionsToGenerate} questions, student answers ANY ${requiredQuestions}]` 
-      : ` [GENERATE ${questionsToGenerate} questions, student answers ALL ${requiredQuestions}]`;
-    
-    partsDescription += `\n${part.name.toUpperCase()} - ${part.marks} marks [DIFFICULTY: ${difficultyLabel}]${choiceInfo}`;
   });
 
-  const prompt = `You are a university professor creating an exam question paper. You MUST generate questions EXCLUSIVELY from the study material provided below. Do NOT use any outside knowledge, general knowledge, or information not present in the study material.
+  const prompt = `You are a university professor. Generate EXACTLY ${totalQuestionsToGenerate} exam questions from the study material below. You MUST generate ALL ${totalQuestionsToGenerate} questions — do not stop early.
 
-SUBJECT: ${subject.subject_name}
-TOTAL MARKS: ${questionConfig.totalMarks}
+SUBJECT: ${subject.subject_name} | TOTAL MARKS: ${questionConfig.totalMarks}
 
-PARTS CONFIGURATION:${partsDescription}
-
-TOTAL QUESTIONS TO GENERATE: ${totalQuestionsToGenerate}
-
-=== STUDY MATERIAL (USE ONLY THIS — NO OUTSIDE KNOWLEDGE) ===
-${contentSections}
-=== END OF STUDY MATERIAL ===
-
-ABSOLUTE RULES — VIOLATION WILL MAKE THE PAPER INVALID:
-
-RULE 1 — ONLY USE CONTENT FROM THE STUDY MATERIAL ABOVE:
-  - Every question MUST be answerable using ONLY the text provided above
-  - Do NOT add concepts, definitions, or facts not present in the material
-  - If a concept is not in the material, do NOT ask about it
-  - Use exact terminology, names, algorithms, and examples from the material
-
-RULE 2 — NEVER reference the source material in questions:
-  WRONG: "According to the text...", "As mentioned in the document...", "What does the author say..."
-  RIGHT: Direct questions using terms from the material — "Define X", "Explain Y", "Compare A and B"
-
-RULE 3 — Write direct, standalone questions using exact terms from the material:
-  - Use exact names, algorithms, formulas, and examples found in the material
-  - Ask about specific concepts by their exact names as they appear in the text
-  - Reference specific examples, case studies, or scenarios from the material by name
-
-RULE 4 — Match difficulty levels strictly:
-${questionConfig.parts.map(part => `  - ${part.name}: ${part.difficulty.toUpperCase()} — ${
-  part.difficulty === 'easy' ? 'Define, list, state, identify (basic recall of terms from material)' :
-  part.difficulty === 'medium' ? 'Explain, compare, illustrate, demonstrate (understanding of concepts in material)' :
-  'Analyze, evaluate, design, justify (higher order thinking applied to material concepts)'
-}`).join('\n')}
-
-QUESTION FORMAT (strictly follow this):
-Q[number]. [Direct question using exact terms from the study material] | [Bloom's Level] | CO[number]
-
-CO MAPPING (use ONLY CO2, CO3, CO4 — NEVER CO1):
-- CO2: Basic recall (Remember, Understand)
-- CO3: Application (Apply, Analyze)
-- CO4: Higher order (Evaluate, Create)
-
-NOW GENERATE ${totalQuestionsToGenerate} QUESTIONS STRICTLY FROM THE STUDY MATERIAL:
+PARTS — generate EXACTLY these counts:
 ${questionConfig.parts.map((part, idx) => {
-  const requiredQuestions = part.questions;
-  const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
-  const startNum = idx === 0 ? 1 : questionConfig.parts.slice(0, idx).reduce((sum, p) => {
-    const req = p.questions;
-    return sum + (p.choicesEnabled ? Math.ceil(req * 1.5) : req);
-  }, 0) + 1;
+  const questionsToGenerate = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
+  const startNum = idx === 0 ? 1 : questionConfig.parts.slice(0, idx).reduce((sum, p) => sum + (p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions), 0) + 1;
   const endNum = startNum + questionsToGenerate - 1;
-  return `\n--- ${part.name.toUpperCase()} (${questionsToGenerate} questions: Q${startNum} to Q${endNum}, ${part.marks} marks, ${part.difficulty.toUpperCase()} difficulty) ---`;
-}).join('')}
+  return `${part.name}: ${questionsToGenerate} questions (Q${startNum}–Q${endNum}), ${part.marks} marks, ${part.difficulty} difficulty`;
+}).join('\n')}
 
-Generate all ${totalQuestionsToGenerate} questions now, using ONLY the study material provided above:`;
+STUDY MATERIAL:
+${contentSections}
+
+RULES:
+- Use ONLY concepts from the study material above
+- Never say "according to the text" or "as mentioned"
+- Use exact terms, names, algorithms from the material
+- Format: Q[n]. [question text] | [Bloom level] | CO[2-4]
+- Bloom levels: Remember/Understand/Apply/Analyze/Evaluate/Create
+- ${questionConfig.parts.map(p => `${p.name}: ${p.difficulty === 'easy' ? 'Remember/Understand' : p.difficulty === 'medium' ? 'Apply/Analyze' : 'Analyze/Evaluate/Create'}`).join(', ')}
+
+GENERATE ALL ${totalQuestionsToGenerate} QUESTIONS NOW (Q1 through Q${totalQuestionsToGenerate}):`;
 
   return prompt;
+}
+
+/**
+ * Extract the most informative content from raw PDF text.
+ * Prioritises: headings, definitions, numbered lists, key sentences.
+ * Keeps output within budget so the AI has room to generate all questions.
+ */
+function extractKeyContent(text: string, budget: number): string {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const scored: Array<{ line: string; score: number }> = [];
+
+  for (const line of lines) {
+    let score = 0;
+    const lower = line.toLowerCase();
+
+    // Headings / chapter titles
+    if (/^(chapter|unit|section|\d+\.|[A-Z][A-Z\s]{4,})/.test(line)) score += 5;
+    // Definitions
+    if (/\b(is defined as|refers to|is called|means|definition|denoted by)\b/.test(lower)) score += 4;
+    // Key terms with colons
+    if (/^[A-Za-z\s]{3,30}:\s/.test(line)) score += 3;
+    // Numbered or bulleted items
+    if (/^[\d\-\*•]\s/.test(line)) score += 2;
+    // Contains technical keywords
+    if (/\b(algorithm|formula|equation|theorem|method|technique|process|function|model|network|layer|node|tree|graph|matrix|vector|probability|entropy|gradient|loss|accuracy|precision|recall)\b/.test(lower)) score += 2;
+    // Long informative sentences
+    if (line.length > 60 && line.length < 300) score += 1;
+    // Skip very short or very long lines
+    if (line.length < 15 || line.length > 500) score -= 2;
+
+    if (score > 0) scored.push({ line, score });
+  }
+
+  // Sort by score descending, then take top lines within budget
+  scored.sort((a, b) => b.score - a.score);
+
+  let result = '';
+  for (const { line } of scored) {
+    if (result.length + line.length + 1 > budget) break;
+    result += line + '\n';
+  }
+
+  // If nothing scored well, just take the first `budget` chars
+  if (result.length < 200) {
+    return text.substring(0, budget);
+  }
+
+  return result;
 }
 
 function generateRealisticContent(unitName: string): string {

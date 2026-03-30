@@ -43,15 +43,34 @@ function generateKalasalingamHTML(
     { name: 'Part A', questions: 25, marks: 50, marksPerQuestion: 2, choicesEnabled: false }
   ];
 
+  // Calculate total questions needed
+  const totalNeeded = partConfig.reduce((sum, p) => {
+    return sum + (p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions);
+  }, 0);
+
+  // Pad questions array if AI gave fewer than needed
+  const allQuestions = [...paper.questions];
+  while (allQuestions.length < totalNeeded) {
+    const idx = allQuestions.length;
+    allQuestions.push({
+      number: idx + 1,
+      question: `Question ${idx + 1}`,
+      pattern: 'Remember',
+      mappingCO: 2 + (idx % 3),
+      marks: 2,
+    });
+  }
+
+  // Re-number sequentially so Q.No in table is always 1,2,3...
+  const numbered = allQuestions.map((q, i) => ({ ...q, number: i + 1 }));
+
   let questionIndex = 0;
 
   const partsHTML = partConfig.map((part) => {
-    // When choices enabled, AI generates 50% more questions (e.g. 6 questions, answer any 4)
     const totalGenerated = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
-    const partQuestions = paper.questions.slice(questionIndex, questionIndex + totalGenerated);
+    const partQuestions = numbered.slice(questionIndex, questionIndex + totalGenerated);
     questionIndex += totalGenerated;
 
-    // Part header: show "Answer any X of Y" when choices enabled
     const choiceNote = part.choicesEnabled
       ? ` (Answer any ${part.questions} of ${totalGenerated})`
       : '';
@@ -216,128 +235,92 @@ export function formatPaperContent(data: {
 }
 
 /**
- * Parse AI-generated questions and convert to Kalasalingam format
+ * Parse AI-generated questions — lenient parser that catches all formats
+ * Then re-numbers them 1..N sequentially so slicing by part always works
  */
 function parseAIQuestionsToKalasalingam(generatedText: string): KalasalingamQuestion[] {
-  const questions: KalasalingamQuestion[] = [];
-  
-  console.log('🔍 Parsing AI-generated questions for Kalasalingam format...');
-  console.log('📄 Generated text length:', generatedText.length);
-  
-  // Try to parse questions from AI response
-  const lines = generatedText.split('\n').filter(line => line.trim().length > 0);
-  
-  for (const line of lines) {
-    // Look for format: Q[number]. [Question] | [Pattern] | [CO]
-    const formatMatch = line.match(/^Q(\d+)\.\s*(.+?)\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?(\d+)/i);
-    
-    if (formatMatch) {
-      const questionNumber = parseInt(formatMatch[1]);
-      let questionText = formatMatch[2].trim();
-      const pattern = formatMatch[3].trim() as 'Remember' | 'Understand' | 'Apply' | 'Analyze' | 'Evaluate' | 'Create';
-      // Ensure CO is always in range 2-4 (CO1 is not valid for exam papers)
-      const rawCO = parseInt(formatMatch[4]);
-      const mappingCO = rawCO >= 2 && rawCO <= 4 ? rawCO : 2 + ((questionNumber - 1) % 3);
-      
-      // Clean up question text - remove any trailing pattern/CO information
-      questionText = questionText.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '');
-      questionText = questionText.replace(/\s*\(.*?\)\s*$/, ''); // Remove any trailing parentheses
-      
-      questions.push({
-        number: questionNumber,
-        question: questionText,
-        pattern,
-        mappingCO,
-        marks: 2
-      });
-      
-      console.log(`✅ Parsed Q${questionNumber}: ${pattern} | CO${mappingCO}`);
+  const raw: Array<{ question: string; pattern: KalasalingamQuestion['pattern']; mappingCO: number }> = [];
+
+  const lines = generatedText.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Format 1 (preferred): Q1. text | Bloom | CO2
+    const fmt1 = line.match(/^Q?\d+[\.\)]\s*(.+?)\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?(\d+)/i);
+    if (fmt1) {
+      let text = fmt1[1].trim();
+      // strip trailing | bloom | co if duplicated
+      text = text.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '').trim();
+      const bloom = normaliseBloom(fmt1[2]);
+      const co = clampCO(parseInt(fmt1[3]), raw.length);
+      if (text.length > 3) raw.push({ question: text, pattern: bloom, mappingCO: co });
       continue;
     }
-    
-    // Fallback: Look for numbered questions without format
-    const simpleMatch = line.match(/^(\d+)[\.\)]\s*(.+)/);
-    if (simpleMatch) {
-      const questionNumber = parseInt(simpleMatch[1]);
-      let questionText = simpleMatch[2].trim();
-      
-      // Clean up question text - remove pattern/CO info if present
-      questionText = questionText.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '');
-      
-      // Determine pattern based on question keywords
-      let pattern: 'Remember' | 'Understand' | 'Apply' | 'Analyze' = 'Remember';
-      const lowerText = questionText.toLowerCase();
-      
-      if (lowerText.includes('explain') || lowerText.includes('describe') || lowerText.includes('discuss')) {
-        pattern = 'Understand';
-      } else if (lowerText.includes('apply') || lowerText.includes('use') || lowerText.includes('demonstrate')) {
-        pattern = 'Apply';
-      } else if (lowerText.includes('analyze') || lowerText.includes('compare') || lowerText.includes('examine')) {
-        pattern = 'Analyze';
-      } else if (lowerText.includes('what') || lowerText.includes('define') || lowerText.includes('list') || lowerText.includes('state')) {
-        pattern = 'Remember';
+
+    // Format 2: plain numbered  "1. text" or "1) text"
+    const fmt2 = line.match(/^(\d+)[\.\)]\s*(.+)/);
+    if (fmt2) {
+      let text = fmt2[2].trim();
+      // strip trailing bloom/co if present
+      text = text.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '').trim();
+      if (text.length > 3 && !isHeaderLine(text)) {
+        const bloom = inferBloom(text);
+        const co = clampCO(0, raw.length);
+        raw.push({ question: text, pattern: bloom, mappingCO: co });
       }
-      
-      // Assign CO based on question number (distribute across CO2, CO3, CO4)
-      const mappingCO = 2 + ((questionNumber - 1) % 3);
-      
-      questions.push({
-        number: questionNumber,
-        question: questionText,
-        pattern,
-        mappingCO,
-        marks: 2
-      });
-      
-      console.log(`✅ Parsed Q${questionNumber} (fallback): ${pattern} | CO${mappingCO}`);
+      continue;
+    }
+
+    // Format 3: line starts with a question word and is long enough (no number prefix)
+    // Only pick up if previous line was a part header or blank
+    if (line.length > 20 && !isHeaderLine(line) && /^(what|define|explain|describe|compare|analyze|evaluate|discuss|state|list|how|why|illustrate|derive|calculate|differentiate)/i.test(line)) {
+      const text = line.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '').trim();
+      if (text.length > 10) {
+        const bloom = inferBloom(text);
+        const co = clampCO(0, raw.length);
+        raw.push({ question: text, pattern: bloom, mappingCO: co });
+      }
     }
   }
-  
-  console.log(`📊 Total questions parsed: ${questions.length}`);
-  
-  // If parsing failed completely, extract questions from text
-  if (questions.length === 0) {
-    console.warn('⚠️ No questions parsed, extracting from text...');
-    
-    // Split by common question patterns
-    const questionPatterns = generatedText.split(/(?=\d+\.|Q\d+\.)/);
-    
-    questionPatterns.forEach((text, index) => {
-      if (text.trim().length > 10 && index > 0) {
-        const questionNumber = index;
-        const questionText = text.replace(/^\d+\.|^Q\d+\./, '').trim().split('\n')[0];
-        
-        if (questionText.length > 5) {
-          const pattern = questionNumber <= 13 ? 'Remember' : questionNumber <= 24 ? 'Understand' : 'Apply';
-          const mappingCO = 2 + ((questionNumber - 1) % 3);
-          
-          questions.push({
-            number: questionNumber,
-            question: questionText,
-            pattern: pattern as 'Remember' | 'Understand' | 'Apply',
-            mappingCO,
-            marks: 2
-          });
-        }
-      }
-    });
-  }
-  
-  // Last resort: create from content if still no questions
-  if (questions.length === 0) {
-    console.error('❌ Failed to parse any questions, using fallback');
-    for (let i = 1; i <= 25; i++) {
-      questions.push({
-        number: i,
-        question: `Question ${i} based on study material content`,
-        pattern: i <= 13 ? 'Remember' : i <= 24 ? 'Understand' : 'Apply',
-        mappingCO: 2 + ((i - 1) % 3),
-        marks: 2
-      });
-    }
-  }
-  
-  return questions.sort((a, b) => a.number - b.number);
+
+  // Re-number sequentially 1..N — this is the key fix
+  // The HTML generator slices by index, so numbering must be 1,2,3...
+  return raw.map((r, i) => ({
+    number: i + 1,
+    question: r.question,
+    pattern: r.pattern,
+    mappingCO: r.mappingCO,
+    marks: 2,
+  }));
+}
+
+function normaliseBloom(raw: string): KalasalingamQuestion['pattern'] {
+  const map: Record<string, KalasalingamQuestion['pattern']> = {
+    remember: 'Remember', understand: 'Understand', apply: 'Apply',
+    analyze: 'Analyze', analyse: 'Analyze', evaluate: 'Evaluate', create: 'Create',
+  };
+  return map[raw.toLowerCase()] || 'Remember';
+}
+
+function inferBloom(text: string): KalasalingamQuestion['pattern'] {
+  const t = text.toLowerCase();
+  if (/\b(evaluate|justify|assess|critique|judge)\b/.test(t)) return 'Evaluate';
+  if (/\b(create|design|construct|develop|formulate)\b/.test(t)) return 'Create';
+  if (/\b(analyze|analyse|compare|differentiate|examine|contrast)\b/.test(t)) return 'Analyze';
+  if (/\b(apply|use|demonstrate|solve|calculate|implement|derive)\b/.test(t)) return 'Apply';
+  if (/\b(explain|describe|discuss|illustrate|summarize|interpret)\b/.test(t)) return 'Understand';
+  return 'Remember';
+}
+
+function clampCO(raw: number, idx: number): number {
+  if (raw >= 2 && raw <= 4) return raw;
+  return 2 + (idx % 3);
+}
+
+function isHeaderLine(text: string): boolean {
+  return /^(part\s+[a-z]|section|---|\*\*\*|note:|instructions?:)/i.test(text.trim());
 }
 
 /**

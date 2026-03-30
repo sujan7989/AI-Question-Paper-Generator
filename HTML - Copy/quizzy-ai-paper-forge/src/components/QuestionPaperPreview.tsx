@@ -75,6 +75,157 @@ function regeneratePaperHTML(paper: QuestionPaper, updatedQuestions: Kalasalinga
   return html;
 }
 
+function buildAnswerKeyHTML(
+  paper: QuestionPaper,
+  questions: KalasalingamQuestion[],
+  answers: Record<number, string>
+): string {
+  // Build part-aware marks map
+  const parts = paper.config.parts || [];
+  let qIndex = 0;
+  const marksMap: Record<number, { marks: number; partName: string }> = {};
+  for (const part of parts) {
+    const count = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
+    for (let i = 0; i < count && qIndex < questions.length; i++, qIndex++) {
+      marksMap[questions[qIndex].number] = { marks: part.marksPerQuestion, partName: part.name };
+    }
+  }
+  while (qIndex < questions.length) {
+    marksMap[questions[qIndex].number] = { marks: 2, partName: 'Part A' };
+    qIndex++;
+  }
+
+  const rowsHTML = questions.map(q => {
+    const answer = answers[q.number];
+    const { marks = 2, partName = 'Part A' } = marksMap[q.number] || {};
+    const isShortAnswer = marks <= 2;
+
+    let answerHTML = '';
+    if (answer) {
+      const points = answer.split('•').map(p => p.trim()).filter(p => p.length > 0);
+      answerHTML = points.map(p => {
+        // Diagram mention
+        if (p.startsWith('[Diagram:')) {
+          return `<li style="margin-bottom:4px;color:#1a56db;font-style:italic;">📐 ${p.replace(/^\[|\]$/g, '')}</li>`;
+        }
+        // Formula mention
+        if (p.startsWith('[Formula:')) {
+          return `<li style="margin-bottom:4px;color:#7e3af2;font-style:italic;">🔢 ${p.replace(/^\[|\]$/g, '')}</li>`;
+        }
+        // Numbered heading (e.g. "1. Definition: ...")
+        if (/^\d+\.\s/.test(p)) {
+          return `<li style="margin-bottom:4px;font-weight:bold;">${p}</li>`;
+        }
+        return `<li style="margin-bottom:4px;">${p}</li>`;
+      }).join('');
+    } else {
+      answerHTML = '<li><em style="color:#888;">Refer to study material</em></li>';
+    }
+
+    const marksLabel = isShortAnswer
+      ? `<span style="font-size:9pt;color:#555;">(${marks} marks — full answer)</span>`
+      : `<span style="font-size:9pt;color:#555;">(${marks} marks — key points & structure)</span>`;
+
+    return `
+    <tr>
+      <td style="padding:6px 10px;border:1px solid #000;text-align:center;font-weight:bold;vertical-align:top;">${q.number}</td>
+      <td style="padding:6px 10px;border:1px solid #000;vertical-align:top;">
+        <div>${q.question}</div>
+        <div style="margin-top:3px;font-size:9pt;color:#777;">${partName} | ${q.pattern} | CO${q.mappingCO}</div>
+      </td>
+      <td style="padding:6px 10px;border:1px solid #000;background:${isShortAnswer ? '#f0fff4' : '#fffde7'};vertical-align:top;">
+        <div style="margin-bottom:4px;">${marksLabel}</div>
+        <ul style="margin:0;padding-left:16px;font-size:10pt;">${answerHTML}</ul>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Group by part for part headers
+  let currentPart = '';
+  const rowsWithHeaders = questions.map(q => {
+    const { partName = 'Part A' } = marksMap[q.number] || {};
+    let header = '';
+    if (partName !== currentPart) {
+      currentPart = partName;
+      header = `<tr><td colspan="3" style="padding:6px 10px;border:1px solid #000;font-weight:bold;background:#e8e8e8;font-size:11pt;">${partName}</td></tr>`;
+    }
+    const answer = answers[q.number];
+    const { marks = 2 } = marksMap[q.number] || {};
+    const isShortAnswer = marks <= 2;
+
+    let answerHTML = '';
+    if (answer) {
+      const points = answer.split('•').map(p => p.trim()).filter(p => p.length > 0);
+      answerHTML = points.map(p => {
+        if (p.startsWith('[Diagram:')) return `<li style="margin-bottom:4px;color:#1a56db;font-style:italic;">📐 ${p.replace(/^\[|\]$/g, '')}</li>`;
+        if (p.startsWith('[Formula:')) return `<li style="margin-bottom:4px;color:#7e3af2;font-style:italic;">🔢 ${p.replace(/^\[|\]$/g, '')}</li>`;
+        if (/^\d+\.\s/.test(p)) return `<li style="margin-bottom:4px;font-weight:bold;">${p}</li>`;
+        return `<li style="margin-bottom:4px;">${p}</li>`;
+      }).join('');
+    } else {
+      answerHTML = '<li><em style="color:#888;">Refer to study material</em></li>';
+    }
+
+    const marksLabel = isShortAnswer
+      ? `<span style="font-size:9pt;color:#2d6a4f;">(${marks} marks — complete answer)</span>`
+      : `<span style="font-size:9pt;color:#7e5a00;">(${marks} marks — structure & key points)</span>`;
+
+    return header + `
+    <tr>
+      <td style="padding:6px 10px;border:1px solid #000;text-align:center;font-weight:bold;vertical-align:top;">${q.number}</td>
+      <td style="padding:6px 10px;border:1px solid #000;vertical-align:top;">
+        <div>${q.question}</div>
+        <div style="margin-top:3px;font-size:9pt;color:#777;">${q.pattern} | CO${q.mappingCO}</div>
+      </td>
+      <td style="padding:6px 10px;border:1px solid #000;background:${isShortAnswer ? '#f0fff4' : '#fffde7'};vertical-align:top;">
+        <div style="margin-bottom:4px;">${marksLabel}</div>
+        <ul style="margin:0;padding-left:16px;font-size:10pt;">${answerHTML}</ul>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${paper.subjectName} - Answer Key</title>
+<style>
+  body { font-family: 'Times New Roman', Times, serif; margin: 15mm; font-size: 11pt; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th { padding: 6px 10px; border: 1px solid #000; background: #d0d0d0; font-weight: bold; }
+  h2 { text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; color: #555; margin-bottom: 16px; font-size: 10pt; }
+  .legend { display:flex; gap:20px; font-size:9pt; margin-bottom:10px; }
+  @media print { body { margin: 0; } @page { margin: 15mm; size: A4; } }
+</style>
+</head>
+<body>
+  <h2>ANSWER KEY / MARKING SCHEME</h2>
+  <div class="subtitle">
+    KALASALINGAM ACADEMY OF RESEARCH AND EDUCATION (Deemed to be University)<br/>
+    ${paper.subjectName} &nbsp;|&nbsp; Total Marks: ${paper.config.totalMarks} &nbsp;|&nbsp; Generated: ${new Date().toLocaleDateString()}
+  </div>
+  <div class="legend">
+    <span style="background:#f0fff4;padding:2px 8px;border:1px solid #ccc;">🟢 Green = Complete answer (2 marks)</span>
+    <span style="background:#fffde7;padding:2px 8px;border:1px solid #ccc;">🟡 Yellow = Structure &amp; key points (long answer)</span>
+    <span style="color:#1a56db;">📐 Blue = Diagram required</span>
+    <span style="color:#7e3af2;">🔢 Purple = Formula/Calculation required</span>
+  </div>
+  <table>
+    <tr>
+      <th style="width:5%">Q.No</th>
+      <th style="width:35%">Question</th>
+      <th style="width:60%">Model Answer / Key Points</th>
+    </tr>
+    ${rowsWithHeaders}
+  </table>
+  <p style="margin-top:16px;font-size:9pt;color:#555;">
+    <strong>Note:</strong> 2-mark answers are complete. Long answers show structure, headings, diagrams and formulas required — not the full essay.
+  </p>
+</body>
+</html>`;
+}
+
 export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', evaluationReport }: QuestionPaperPreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const answerKeyIframeRef = useRef<HTMLIFrameElement>(null);
@@ -82,6 +233,7 @@ export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', ev
   const [showStats, setShowStats] = useState(false);
   const [showEvaluation, setShowEvaluation] = useState(false);
   const [answerKeyHTML, setAnswerKeyHTML] = useState('');
+  const [answerKeyLoading, setAnswerKeyLoading] = useState(false);
 
   // Inline edit state
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -129,9 +281,96 @@ export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', ev
   useEffect(() => { renderToIframe(iframeRef, currentPaperHTML); }, [currentPaperHTML]);
   useEffect(() => { if (showAnswerKey && answerKeyHTML) renderToIframe(answerKeyIframeRef, answerKeyHTML); }, [showAnswerKey, answerKeyHTML]);
 
-  const handleAnswerKey = () => {
-    setAnswerKeyHTML(generateAnswerKeyHTML(paper));
+  const handleAnswerKey = async () => {
+    if (answerKeyHTML) { setShowAnswerKey(true); return; }
+    setAnswerKeyLoading(true);
     setShowAnswerKey(true);
+    try {
+      const questions = editedQuestions.length > 0 ? editedQuestions : parsedQuestions;
+      if (questions.length === 0) {
+        setAnswerKeyHTML(generateAnswerKeyHTML(paper));
+        return;
+      }
+
+      // Build part-aware question list so AI knows marks per question
+      const parts = paper.config.parts || [];
+      let qIndex = 0;
+      const questionWithMarks: Array<{ q: KalasalingamQuestion; marks: number; partName: string }> = [];
+      for (const part of parts) {
+        const count = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
+        for (let i = 0; i < count && qIndex < questions.length; i++, qIndex++) {
+          questionWithMarks.push({ q: questions[qIndex], marks: part.marksPerQuestion, partName: part.name });
+        }
+      }
+      // Any remaining questions not covered by parts
+      while (qIndex < questions.length) {
+        questionWithMarks.push({ q: questions[qIndex], marks: 2, partName: 'Part A' });
+        qIndex++;
+      }
+
+      const questionList = questionWithMarks.map(({ q, marks, partName }) =>
+        `Q${q.number}. [${partName} - ${marks} marks | ${q.pattern}] ${q.question}`
+      ).join('\n');
+
+      const prompt = `You are a university professor writing an answer key / marking scheme for "${paper.subjectName}" exam.
+
+For each question, generate the answer based on its marks:
+
+RULE FOR 2-MARK QUESTIONS (Part A):
+- Write the COMPLETE direct answer in 2-4 sentences
+- Student can write this in 4-6 lines
+- No headings needed, just the full answer
+- Format: • Complete answer sentence 1 • Complete answer sentence 2
+
+RULE FOR 5-16 MARK QUESTIONS (Part B / Part C):
+- DO NOT write the full essay answer
+- Give the STRUCTURE and KEY POINTS an examiner looks for:
+  → Main headings the answer must cover (e.g., "1. Definition  2. Working Principle  3. Types")
+  → If a diagram is needed: write "[Diagram: <diagram name>]" (e.g., "[Diagram: Decision Tree structure]")
+  → If a formula/calculation is needed: write "[Formula: <formula in words>]" (e.g., "[Formula: Gini Index = 1 - Σ(pi²)]")
+  → 2-3 key sub-points under each heading
+- For Part B (5-10 marks): 3-4 main headings with sub-points
+- For Part C (10+ marks): 5-6 main headings with sub-points, more diagrams/formulas
+
+QUESTIONS:
+${questionList}
+
+FORMAT (strictly follow):
+Q1_ANSWER: • point • point • point
+Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [Diagram: name] • [Formula: name]
+(one line per question, use • as separator between points)`;
+
+      const response = await fetch(`${window.location.origin}/api/nvidia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'meta/llama-3.1-405b-instruct',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 4096,
+        }),
+      });
+
+      let answers: Record<number, string> = {};
+
+      if (response.ok) {
+        const data = await response.json();
+        const text: string = data.choices[0].message.content;
+        const matches = text.matchAll(/Q(\d+)_ANSWER:\s*(.+?)(?=Q\d+_ANSWER:|$)/gs);
+        for (const m of matches) {
+          answers[parseInt(m[1])] = m[2].trim();
+        }
+      }
+
+      // Build HTML with real answers
+      const html = buildAnswerKeyHTML(paper, questions, answers);
+      setAnswerKeyHTML(html);
+    } catch {
+      // Fallback to placeholder if AI fails
+      setAnswerKeyHTML(generateAnswerKeyHTML(paper));
+    } finally {
+      setAnswerKeyLoading(false);
+    }
   };
 
   const openInNewWindow = () => {
@@ -216,8 +455,9 @@ export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', ev
               <Sparkles className="w-4 h-4 mr-2" />{showEvaluation ? 'Hide AI Eval' : 'AI Evaluation'}
             </Button>
           )}
-          <Button variant={showAnswerKey ? 'secondary' : 'outline'} onClick={() => showAnswerKey ? setShowAnswerKey(false) : handleAnswerKey()}>
-            <Key className="w-4 h-4 mr-2" />{showAnswerKey ? 'Hide Answer Key' : 'Answer Key'}
+          <Button variant={showAnswerKey ? 'secondary' : 'outline'} onClick={() => showAnswerKey ? setShowAnswerKey(false) : handleAnswerKey()} disabled={answerKeyLoading}>
+            <Key className="w-4 h-4 mr-2" />
+            {answerKeyLoading ? 'Generating Answers...' : showAnswerKey ? 'Hide Answer Key' : 'Answer Key'}
           </Button>
         </div>
       </div>
@@ -399,17 +639,25 @@ export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', ev
               <Key className="w-5 h-5 text-amber-500" />Answer Key / Marking Scheme
             </h3>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(answerKeyHTML); w.document.close(); } }}>
+              <Button variant="outline" size="sm" disabled={answerKeyLoading} onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(answerKeyHTML); w.document.close(); } }}>
                 <ExternalLink className="w-4 h-4 mr-1" />Open
               </Button>
-              <Button variant="outline" size="sm" onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(answerKeyHTML); w.document.close(); setTimeout(() => w.print(), 500); } }}>
+              <Button variant="outline" size="sm" disabled={answerKeyLoading} onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(answerKeyHTML); w.document.close(); setTimeout(() => w.print(), 500); } }}>
                 <FileText className="w-4 h-4 mr-1" />Print
               </Button>
             </div>
           </div>
-          <div className="border-2 border-amber-300 rounded-lg overflow-auto bg-white shadow-lg">
-            <iframe ref={answerKeyIframeRef} title="Answer Key" className="w-full" style={{ border: 'none', minHeight: '600px', display: 'block' }} />
-          </div>
+          {answerKeyLoading ? (
+            <div className="border-2 border-amber-300 rounded-lg bg-amber-50 dark:bg-amber-950/20 flex flex-col items-center justify-center py-16 gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+              <p className="text-amber-700 dark:text-amber-400 font-medium text-sm">AI is generating model answers from your PDF content...</p>
+              <p className="text-amber-600/70 text-xs">This takes 10–20 seconds</p>
+            </div>
+          ) : (
+            <div className="border-2 border-amber-300 rounded-lg overflow-auto bg-white shadow-lg">
+              <iframe ref={answerKeyIframeRef} title="Answer Key" className="w-full" style={{ border: 'none', minHeight: '600px', display: 'block' }} />
+            </div>
+          )}
         </div>
       )}
     </div>

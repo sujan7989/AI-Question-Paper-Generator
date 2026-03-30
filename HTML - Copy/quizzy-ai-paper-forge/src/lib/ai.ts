@@ -267,7 +267,7 @@ async function generateWithNvidiaAIFullPrompt(fullPrompt: string): Promise<strin
         messages: [{ role: 'user', content: fullPrompt }],
         temperature: 0.2,
         top_p: 0.7,
-        max_tokens: 4096,
+        max_tokens: 8192,
         stream: false
       })
     });
