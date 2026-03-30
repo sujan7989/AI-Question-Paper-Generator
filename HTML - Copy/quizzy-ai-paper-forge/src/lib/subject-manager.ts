@@ -258,30 +258,34 @@ export async function generatePromptFromSubjectUnits(
             
             if (extraction.success && extraction.text.length > 100) {
               actualContent = extraction.text;
+              // Cache it back to DB so next time it's instant
               await supabase
                 .from('units')
                 .update({ extracted_content: { text: extraction.text, numPages: extraction.numPages } })
                 .eq('id', unit.id);
             } else {
-              actualContent = generateRealisticContent(unit.unit_name);
+              throw new Error(`Could not extract text from the PDF for "${unit.unit_name}". The PDF may be image-based or scanned. Please re-upload a text-based PDF.`);
             }
           } else {
-            actualContent = generateRealisticContent(unit.unit_name);
+            throw new Error(`Could not download the PDF for "${unit.unit_name}". Please re-upload the PDF in Subject Setup.`);
           }
-        } catch (emergencyError) {
-          actualContent = generateRealisticContent(unit.unit_name);
+        } catch (emergencyError: any) {
+          // Re-throw with clear message — never silently use fake content
+          throw new Error(emergencyError?.message || `Failed to load PDF content for "${unit.unit_name}". Please re-upload the PDF.`);
         }
       } else {
-        actualContent = generateRealisticContent(unit.unit_name);
+        throw new Error(`No PDF uploaded for "${unit.unit_name}". Please go to Subject Setup and upload a PDF for this unit.`);
       }
     } else {
       actualContent = unit.extracted_content.text;
     }
     
-    // Give each unit up to 6000 chars — much better context for AI
-    const maxLength = Math.floor((weightage / 100) * 6000);
+    // Give each unit proportional content — minimum 3000 chars, max 8000 chars per unit
+    // Never truncate below 3000 chars regardless of weightage
+    const minLength = 3000;
+    const maxLength = Math.max(minLength, Math.floor((weightage / 100) * 12000));
     const content = actualContent.length > maxLength 
-      ? actualContent.substring(0, maxLength) + '...'
+      ? actualContent.substring(0, maxLength) + '...[content continues]'
       : actualContent;
     
     contentSections += content;
@@ -303,7 +307,7 @@ export async function generatePromptFromSubjectUnits(
     partsDescription += `\n${part.name.toUpperCase()} - ${part.marks} marks [DIFFICULTY: ${difficultyLabel}]${choiceInfo}`;
   });
 
-  const prompt = `You are a university professor creating an exam question paper. Generate exam-style questions directly from the study material below.
+  const prompt = `You are a university professor creating an exam question paper. You MUST generate questions EXCLUSIVELY from the study material provided below. Do NOT use any outside knowledge, general knowledge, or information not present in the study material.
 
 SUBJECT: ${subject.subject_name}
 TOTAL MARKS: ${questionConfig.totalMarks}
@@ -312,57 +316,43 @@ PARTS CONFIGURATION:${partsDescription}
 
 TOTAL QUESTIONS TO GENERATE: ${totalQuestionsToGenerate}
 
-=== STUDY MATERIAL ===
+=== STUDY MATERIAL (USE ONLY THIS — NO OUTSIDE KNOWLEDGE) ===
 ${contentSections}
 === END OF STUDY MATERIAL ===
 
-STRICT RULES FOR QUESTION WRITING:
+ABSOLUTE RULES — VIOLATION WILL MAKE THE PAPER INVALID:
 
-RULE 1 - NEVER reference the source material in questions:
-  WRONG: "What is the definition of learning according to the given text?"
-  WRONG: "As mentioned in the document, what is..."
-  WRONG: "According to the text, explain..."
-  WRONG: "What does the author say about..."
-  RIGHT: "Define machine learning."
-  RIGHT: "What are the three components of a well-defined learning task?"
-  RIGHT: "Explain Tom Mitchell's definition of machine learning."
+RULE 1 — ONLY USE CONTENT FROM THE STUDY MATERIAL ABOVE:
+  - Every question MUST be answerable using ONLY the text provided above
+  - Do NOT add concepts, definitions, or facts not present in the material
+  - If a concept is not in the material, do NOT ask about it
+  - Use exact terminology, names, algorithms, and examples from the material
 
-RULE 2 - Write direct, standalone questions:
-  WRONG: "What is the learning task defined by the example in the text?"
-  RIGHT: "What is the learning task in the checkers game example?"
-  WRONG: "What performance metric is mentioned for handwritten word recognition?"
-  RIGHT: "What performance metric is used to evaluate handwritten word recognition systems?"
+RULE 2 — NEVER reference the source material in questions:
+  WRONG: "According to the text...", "As mentioned in the document...", "What does the author say..."
+  RIGHT: Direct questions using terms from the material — "Define X", "Explain Y", "Compare A and B"
 
-RULE 3 - Use specific terms, names, and concepts from the material:
-  - Use exact names (e.g., "Tom Mitchell", "Herbert Simon")
-  - Use exact technical terms from the material
-  - Reference specific examples by name (e.g., "checkers game", "spam detection")
-  - Ask about specific algorithms, methods, or concepts by their proper names
+RULE 3 — Write direct, standalone questions using exact terms from the material:
+  - Use exact names, algorithms, formulas, and examples found in the material
+  - Ask about specific concepts by their exact names as they appear in the text
+  - Reference specific examples, case studies, or scenarios from the material by name
 
-RULE 4 - Match difficulty levels:
-${questionConfig.parts.map(part => `  - ${part.name}: ${part.difficulty.toUpperCase()} - ${
-  part.difficulty === 'easy' ? 'Define, list, state, identify (basic recall)' :
-  part.difficulty === 'medium' ? 'Explain, compare, illustrate, demonstrate (understanding)' :
-  'Analyze, evaluate, design, justify (higher order thinking)'
+RULE 4 — Match difficulty levels strictly:
+${questionConfig.parts.map(part => `  - ${part.name}: ${part.difficulty.toUpperCase()} — ${
+  part.difficulty === 'easy' ? 'Define, list, state, identify (basic recall of terms from material)' :
+  part.difficulty === 'medium' ? 'Explain, compare, illustrate, demonstrate (understanding of concepts in material)' :
+  'Analyze, evaluate, design, justify (higher order thinking applied to material concepts)'
 }`).join('\n')}
 
 QUESTION FORMAT (strictly follow this):
-Q[number]. [Direct question without any reference to "text", "document", "given", "mentioned"] | [Bloom's Level] | CO[number]
+Q[number]. [Direct question using exact terms from the study material] | [Bloom's Level] | CO[number]
 
-CO MAPPING RULES (IMPORTANT - use ONLY CO2, CO3, or CO4):
-- CO2: Basic recall questions (Remember, Understand)
-- CO3: Application questions (Apply, Analyze)  
-- CO4: Higher order questions (Evaluate, Create)
-- NEVER use CO1 - it is reserved for introductory content only
+CO MAPPING (use ONLY CO2, CO3, CO4 — NEVER CO1):
+- CO2: Basic recall (Remember, Understand)
+- CO3: Application (Apply, Analyze)
+- CO4: Higher order (Evaluate, Create)
 
-Example of CORRECT questions:
-Q1. Define machine learning. | Remember | CO2
-Q2. Explain the three components of a well-defined learning task. | Understand | CO2
-Q3. What performance measure is used in the checkers game learning problem? | Remember | CO3
-Q4. Compare supervised and unsupervised learning approaches. | Analyze | CO3
-Q5. How does Tom Mitchell's 1998 definition differ from earlier definitions of machine learning? | Analyze | CO4
-
-NOW GENERATE ${totalQuestionsToGenerate} QUESTIONS:
+NOW GENERATE ${totalQuestionsToGenerate} QUESTIONS STRICTLY FROM THE STUDY MATERIAL:
 ${questionConfig.parts.map((part, idx) => {
   const requiredQuestions = part.questions;
   const questionsToGenerate = part.choicesEnabled ? Math.ceil(requiredQuestions * 1.5) : requiredQuestions;
@@ -371,11 +361,10 @@ ${questionConfig.parts.map((part, idx) => {
     return sum + (p.choicesEnabled ? Math.ceil(req * 1.5) : req);
   }, 0) + 1;
   const endNum = startNum + questionsToGenerate - 1;
-  return `\n--- ${part.name.toUpperCase()} (${questionsToGenerate} questions: Q${startNum} to Q${endNum}, ${part.marks} marks each, ${part.difficulty.toUpperCase()} difficulty) ---`;
+  return `\n--- ${part.name.toUpperCase()} (${questionsToGenerate} questions: Q${startNum} to Q${endNum}, ${part.marks} marks, ${part.difficulty.toUpperCase()} difficulty) ---`;
 }).join('')}
 
-Generate all ${totalQuestionsToGenerate} direct exam questions without any reference to "text", "document", "given text", or "mentioned":`;
-
+Generate all ${totalQuestionsToGenerate} questions now, using ONLY the study material provided above:`;
 
   return prompt;
 }

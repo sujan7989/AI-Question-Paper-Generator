@@ -15,6 +15,7 @@ import { FileText, Plus, Trash2, Brain, Target, Eye, CheckCircle } from 'lucide-
 import { generateQuestions, type ApiProvider } from '@/lib/ai';
 import { formatPaperContent, downloadPaperAsPDF, type QuestionPaper } from '@/lib/paper';
 import { getUserSubjects, generatePromptFromSubjectUnits, type Subject } from '@/lib/subject-manager';
+import { evaluateQuestions, type EvaluationReport } from '@/lib/evaluator';
 
 type ToastReturnType = {
   id: string;
@@ -29,6 +30,7 @@ interface Part {
   marksPerQuestion: number;
   choicesEnabled: boolean;
   difficulty: 'easy' | 'medium' | 'hard';
+  scenarioQuestions: number; // how many questions in this part should be scenario-based
 }
 
 // Using Subject interface from subject-manager
@@ -50,9 +52,9 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   const [apiProvider, setApiProvider] = useState<ApiProvider>('nvidia'); // NVIDIA as primary
   const [totalQuestions, setTotalQuestions] = useState<number>(10);
   const [parts, setParts] = useState<Part[]>([
-    { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy' },
-    { name: 'Part B', marks: 30, questions: 6, marksPerQuestion: 5, choicesEnabled: true, difficulty: 'medium' },
-    { name: 'Part C', marks: 50, questions: 4, marksPerQuestion: 12.5, choicesEnabled: true, difficulty: 'hard' },
+    { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy', scenarioQuestions: 0 },
+    { name: 'Part B', marks: 30, questions: 6, marksPerQuestion: 5, choicesEnabled: true, difficulty: 'medium', scenarioQuestions: 0 },
+    { name: 'Part C', marks: 50, questions: 4, marksPerQuestion: 12.5, choicesEnabled: true, difficulty: 'hard', scenarioQuestions: 0 },
   ]);
   const [unitWeightage, setUnitWeightage] = useState<{ [unit: string]: number }>({});
   const [selectedTopics, setSelectedTopics] = useState<{ [unitId: string]: string[] }>({});
@@ -72,6 +74,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
     }
   });
   const [viewingAllPapers, setViewingAllPapers] = useState(false);
+  const [evaluationReport, setEvaluationReport] = useState<EvaluationReport | null>(null);
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
 
@@ -88,7 +91,8 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       questions: 5,
       marksPerQuestion: 2,
       choicesEnabled: false,
-      difficulty: 'medium'
+      difficulty: 'medium',
+      scenarioQuestions: 0,
     }]);
   };
 
@@ -344,12 +348,26 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
 
       // Generate prompt and questions
       const { generatePromptFromSubjectUnits } = await import('@/lib/subject-manager');
-      const prompt = await generatePromptFromSubjectUnits(
+      let prompt = await generatePromptFromSubjectUnits(
         selectedSubject,
         selectedUnits,
         unitWeightages,
         questionConfig
       );
+
+      // Append scenario-based question instructions if any part has scenarioQuestions > 0
+      const scenarioParts = parts.filter(p => p.scenarioQuestions > 0);
+      if (scenarioParts.length > 0) {
+        const scenarioInstructions = scenarioParts.map(p =>
+          `- ${p.name}: Generate ${p.scenarioQuestions} SCENARIO-BASED question${p.scenarioQuestions > 1 ? 's' : ''}. ` +
+          `For each scenario question: first write a short real-world context/passage (2-4 sentences) based on the PDF content, ` +
+          `then ask a question derived from that scenario. ` +
+          `Format: Q[number]. [Scenario: <context passage>] [Question text] | [Bloom level] | CO[number]`
+        ).join('\n');
+
+        prompt += `\n\nSCENARIO-BASED QUESTION REQUIREMENTS:\n${scenarioInstructions}\n` +
+          `IMPORTANT: The remaining ${parts.reduce((s, p) => s + p.questions, 0) - scenarioParts.reduce((s, p) => s + p.scenarioQuestions, 0)} questions should be regular (non-scenario) questions as normal.`;
+      }
 
       const { generateQuestions } = await import('@/lib/ai');
       const generatedQuestions = await generateQuestions(apiProvider, prompt);
@@ -461,6 +479,16 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         setLatestPaper(newPaper);
         try { localStorage.setItem('lastPaper', JSON.stringify(newPaper)); } catch {}
         setShowPreview(true);
+
+        // Run AI evaluation in background (non-blocking)
+        const questionsForEval = newPaper.questions.map(q => ({
+          question: q.question,
+          bloom_level: 'Understand',
+          unit_source: selectedSubject?.subject_name,
+        }));
+        evaluateQuestions(questionsForEval, selectedSubject?.subject_name || subjectName)
+          .then(report => setEvaluationReport(report))
+          .catch(() => {/* silent — evaluation is optional */});
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -613,6 +641,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       <QuestionPaperPreview 
         paper={latestPaper}
         apiProvider={apiProvider}
+        evaluationReport={evaluationReport}
         onBack={() => {
           setShowPreview(false);
           setLatestPaper(null);
@@ -920,6 +949,31 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
                       </div>
                     </div>
                   </div>
+
+                  {/* Scenario-based questions toggle */}
+                  <div className="flex items-center gap-4 pt-1 border-t mt-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">🎯 Scenario-Based Questions</span>
+                      <span className="text-xs text-muted-foreground">— AI generates a real-world scenario passage, then asks questions from it</span>
+                    </div>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Label className="text-sm whitespace-nowrap">How many?</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={part.questions}
+                        value={part.scenarioQuestions}
+                        onChange={(e) => updatePart(index, 'scenarioQuestions', Math.min(Number(e.target.value), part.questions))}
+                        className="w-20"
+                      />
+                      <span className="text-xs text-muted-foreground">of {part.questions} questions</span>
+                    </div>
+                  </div>
+                  {part.scenarioQuestions > 0 && (
+                    <div className="text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/30 rounded px-3 py-1.5 border border-indigo-200 dark:border-indigo-800">
+                      ✅ {part.scenarioQuestions} scenario-based question{part.scenarioQuestions > 1 ? 's' : ''} will be generated for {part.name} — AI will create a context passage and derive questions from it.
+                    </div>
+                  )}
                 </div>
               ))}
             </CardContent>
