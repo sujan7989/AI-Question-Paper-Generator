@@ -227,8 +227,8 @@ export async function extractContentForUnits(
   const relevantUnits = subject.units.filter(unit => selectedUnits.includes(unit.id));
   if (relevantUnits.length === 0) throw new Error('No units selected');
 
-  // 5000 chars per unit — enough for real questions
-  const perUnitBudget = Math.min(5000, Math.floor(15000 / relevantUnits.length));
+  // 8000 chars per unit — more real content = better questions
+  const perUnitBudget = Math.min(8000, Math.floor(24000 / relevantUnits.length));
   let contentSections = '';
 
   for (const unit of relevantUnits) {
@@ -331,31 +331,34 @@ export function buildCombinedPrompt(
     return line;
   }).join('\n');
 
-  // Cap content at 2000 chars — leaves enough tokens for 25 questions output
-  const content = contentSections.substring(0, 2000);
+  // Use up to 6000 chars — enough real content for the AI to work from
+  const content = contentSections.substring(0, 6000);
 
-  return `Generate EXACTLY ${totalQ} exam questions from the PDF content below.
+  return `You are a university exam paper setter. Generate EXACTLY ${totalQ} exam questions STRICTLY from the PDF content provided below.
 
 PARTS:
 ${partLines}
 
-=== PDF CONTENT ===
+=== PDF CONTENT (use ONLY this) ===
 ${content}
-=== END ===
+=== END OF PDF CONTENT ===
 
-STRICT FORMAT — every line must look exactly like this:
-Q1. What is Gini Index? | Remember | CO2
-Q2. Explain how decision trees handle overfitting. | Understand | CO3
-Q3. Calculate the entropy for a node with 5 positive and 3 negative examples. | Apply | CO4
+CRITICAL RULES — VIOLATION MEANS FAILURE:
+1. Every question MUST be based on a specific topic, term, concept, or example that appears VERBATIM in the PDF content above
+2. Do NOT use any general knowledge, outside topics, or concepts not present in the PDF
+3. Do NOT ask about: zero-trust, IoT, AI/ML, blockchain, cloud, or ANY topic not explicitly in the PDF above
+4. Questions must test understanding of what is ACTUALLY written in the PDF
+5. Do NOT mention the subject name in any question
 
-RULES:
-- Use ONLY terms, formulas, algorithms from the PDF above
-- Do NOT use general knowledge
-- Do NOT mention the subject name in questions
-- Bloom must be one of: Remember, Understand, Apply, Analyze, Evaluate, Create
-- CO must be exactly CO2, CO3, or CO4
+FORMAT — every line exactly like this:
+Q1. Define the CIA Triad and explain its three components. | Remember | CO2
+Q2. Explain how DNS Spoofing works and how it can be detected. | Understand | CO3
+Q3. Compare active attacks and passive attacks with examples from the study material. | Analyze | CO4
 
-Generate Q1 to Q${totalQ}:`;
+Bloom must be: Remember, Understand, Apply, Analyze, Evaluate, or Create
+CO must be exactly: CO2, CO3, or CO4
+
+Generate Q1 to Q${totalQ} now (ONLY from the PDF content above):`;
 }
 
 /**
