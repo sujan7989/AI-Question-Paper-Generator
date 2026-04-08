@@ -77,7 +77,6 @@ export function Dashboard() {
   const [paperDateFilter, setPaperDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [subjectSearch, setSubjectSearch] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [confettiFired, setConfettiFired] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [users, setUsers] = useState<any[]>([]);
@@ -238,12 +237,7 @@ export function Dashboard() {
 
   const handleNewPaperGenerated = () => {
     queryClient.invalidateQueries({ queryKey: ['papers'] });
-    if (!confettiFired) {
-      launchConfetti();
-      setConfettiFired(true);
-    } else {
-      launchConfetti();
-    }
+    launchConfetti();
     toast({ title: "Paper Generated 🎉", description: "Your question paper is ready." });
   };
 
@@ -375,6 +369,10 @@ export function Dashboard() {
                           {subjects.length > 0 ? (questionPapers.length / subjects.length).toFixed(1) : '0'}
                         </div>
                         <p className="text-xs text-muted-foreground">Average papers per subject</p>
+                        <div className="mt-2 w-full bg-muted rounded-full h-1.5">
+                          <div className="h-1.5 rounded-full bg-green-500 transition-all duration-700" style={{ width: `${successRate}%` }} />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{successRate}% generation rate</p>
                       </CardContent>
                     </Card>
                     {controls}

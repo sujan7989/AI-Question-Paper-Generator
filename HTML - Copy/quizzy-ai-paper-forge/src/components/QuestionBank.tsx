@@ -81,10 +81,47 @@ export function QuestionBank() {
           </h2>
           <p className="text-muted-foreground">Saved questions you can reuse across papers</p>
         </div>
-        {bank.length > 0 && (
+      {bank.length > 0 && (
+          <div className="flex gap-2">
           <Button variant="destructive" size="sm" onClick={handleClearAll}>
             <Trash2 className="w-4 h-4 mr-2" />Clear All
           </Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            const json = JSON.stringify(bank, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'question_bank_backup.json'; a.click();
+            URL.revokeObjectURL(url);
+            toast({ title: 'Exported', description: 'Question bank downloaded as JSON.' });
+          }}>
+            Export Backup
+          </Button>
+          <label>
+            <Button variant="outline" size="sm" asChild>
+              <span>Import Backup</span>
+            </Button>
+            <input type="file" accept=".json" className="hidden" onChange={e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = ev => {
+                try {
+                  const imported: BankQuestion[] = JSON.parse(ev.target?.result as string);
+                  const merged = [...bank];
+                  let added = 0;
+                  for (const q of imported) {
+                    if (!merged.some(b => b.question === q.question)) { merged.unshift(q); added++; }
+                  }
+                  setBank(merged); saveBank(merged);
+                  toast({ title: 'Imported', description: `${added} new questions added.` });
+                } catch { toast({ title: 'Import failed', description: 'Invalid file.', variant: 'destructive' }); }
+              };
+              reader.readAsText(file);
+              e.target.value = '';
+            }} />
+          </label>
+          </div>
         )}
       </div>
 

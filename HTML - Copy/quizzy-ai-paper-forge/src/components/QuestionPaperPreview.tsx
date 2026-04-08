@@ -437,10 +437,15 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
       const existingForPart = editedQuestions.slice(startIdx, endIdx);
       const existingText = existingForPart.map(q => `Q${q.number}. ${q.question} | ${q.pattern} | CO${q.mappingCO}`).join('\n');
 
+      // Extract any PDF content stored in the paper for context
+      const pdfContext = paper.questions[0]?.question
+        ? `\nSUBJECT CONTENT CONTEXT (use topics from this):\n${paper.questions[0].question.substring(0, 2000)}\n`
+        : '';
+
       const prompt = `You are a university exam question writer for subject "${paper.subjectName}".
 
 Regenerate EXACTLY ${count} NEW questions for ${partName} (${partConfig.marks} marks, ${partConfig.marksPerQuestion} marks each, difficulty: ${(partConfig as any).difficulty || 'medium'}).
-
+${pdfContext}
 Current questions (replace ALL of these with completely new ones):
 ${existingText}
 
@@ -448,6 +453,8 @@ STRICT FORMAT — every line must look exactly like this:
 Q${startIdx + 1}. question text | Bloom | CO2
 
 Rules:
+- Use ONLY topics from the subject content context above
+- Do NOT use general knowledge or topics not in the content
 - Bloom must be one of: Remember, Understand, Apply, Analyze, Evaluate, Create
 - CO must be CO2, CO3, or CO4
 - Number questions starting from Q${startIdx + 1} to Q${endIdx}
