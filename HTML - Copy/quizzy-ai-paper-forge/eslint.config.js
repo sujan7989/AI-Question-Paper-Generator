@@ -23,7 +23,24 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+      // Unused vars — off (handled by TS compiler)
       "@typescript-eslint/no-unused-vars": "off",
+      // Allow explicit any in specific cases (Supabase responses, PDF.js items, catch blocks)
+      "@typescript-eslint/no-explicit-any": "warn",
+      // Allow empty interfaces (used by shadcn/ui generated components)
+      "@typescript-eslint/no-empty-object-type": "off",
+      // Allow require() in config files
+      "@typescript-eslint/no-require-imports": "off",
+      // Allow empty catch blocks (used for silent fallbacks in AI providers)
+      "no-empty": ["error", { "allowEmptyCatch": true }],
+      // Allow control chars in regex (used in PDF text sanitization)
+      "no-control-regex": "off",
+      // Useless escapes — warn only, not error
+      "no-useless-escape": "warn",
+      // prefer-const — warn only
+      "prefer-const": "warn",
+      // Useless catch — warn only
+      "no-useless-catch": "warn",
     },
   }
 );

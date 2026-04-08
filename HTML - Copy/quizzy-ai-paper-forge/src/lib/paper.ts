@@ -106,6 +106,7 @@ function generateKalasalingamHTML(
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
   th { padding: 6px 8px; border: 1px solid #000; background: #e8e8e8; font-weight: bold; }
   @media print { body { margin: 0; } @page { margin: 15mm; size: A4; } }
+  @media screen and (max-width: 600px) { body { margin: 4mm; font-size: 10pt; } }
 </style>
 </head>
 <body>
@@ -145,6 +146,48 @@ function generateKalasalingamHTML(
 <table>
   <tr><th colspan="2">Course Outcomes</th></tr>
   ${coRows}
+</table>
+<table>
+  <tr><th colspan="10">CO-PO Mapping</th></tr>
+  <tr>
+    <th>CO/PO</th><th>PO1</th><th>PO2</th><th>PO3</th><th>PO4</th><th>PO5</th><th>PO6</th><th>PO7</th><th>PO8</th><th>PO9</th>
+  </tr>
+  <tr>
+    <td style="padding:4px 8px;border:1px solid #000;font-weight:bold;">CO2</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">3</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">2</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">1</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+  </tr>
+  <tr>
+    <td style="padding:4px 8px;border:1px solid #000;font-weight:bold;">CO3</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">3</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">2</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">1</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+  </tr>
+  <tr>
+    <td style="padding:4px 8px;border:1px solid #000;font-weight:bold;">CO4</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">-</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">3</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">2</td>
+    <td style="padding:4px 8px;border:1px solid #000;text-align:center;">1</td>
+  </tr>
 </table>
 </body>
 </html>`;
@@ -251,12 +294,27 @@ function parseAIQuestionsToKalasalingam(generatedText: string): KalasalingamQues
     const fmt1 = line.match(/^Q?\d+[\.\)]\s*(.+?)\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?(\d+)/i);
     if (fmt1) {
       let text = fmt1[1].trim();
-      // strip trailing | bloom | co if duplicated
       text = text.replace(/\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?\d+\s*$/i, '').trim();
       const bloom = normaliseBloom(fmt1[2]);
       const co = clampCO(parseInt(fmt1[3]), raw.length);
       if (text.length > 3) raw.push({ question: text, pattern: bloom, mappingCO: co });
       continue;
+    }
+
+    // Format 1b: Q1. text | (Groq sometimes omits Bloom and CO — just has trailing pipe)
+    const fmt1b = line.match(/^Q?\d+[\.\)]\s*(.+?)\s*\|?\s*$/);
+    if (fmt1b && (!line.includes('|') || (line.match(/\|/g) || []).length < 2)) {
+      // Line has 0 or 1 pipe — extract question text
+      const qMatch = line.match(/^Q?\d+[\.\)]\s*(.+?)(?:\s*\|.*)?$/);
+      if (qMatch) {
+        const text = qMatch[1].trim();
+        if (text.length > 10 && !isHeaderLine(text)) {
+          const bloom = inferBloom(text);
+          const co = clampCO(0, raw.length);
+          raw.push({ question: text, pattern: bloom, mappingCO: co });
+          continue;
+        }
+      }
     }
 
     // Format 2: plain numbered  "1. text" or "1) text"

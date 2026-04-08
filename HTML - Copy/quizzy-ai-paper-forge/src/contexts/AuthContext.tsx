@@ -39,11 +39,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  // Faster fallback mechanism to prevent infinite loading
+  // Single fallback timeout — prevents infinite loading if auth hangs
   useEffect(() => {
     const fallbackTimeout = setTimeout(() => {
       setLoading(false);
-    }, 4000); // Reduced from 6 to 4 seconds
+    }, 5000);
 
     return () => clearTimeout(fallbackTimeout);
   }, []);
@@ -51,21 +51,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Optimized auth initialization with better error handling
   useEffect(() => {
     let mounted = true;
-    let timeoutId: NodeJS.Timeout;
 
     const initializeAuth = async () => {
       try {
-        // Set a shorter timeout to prevent hanging
-        timeoutId = setTimeout(() => {
-          if (mounted) {
-            setLoading(false);
-          }
-        }, 3000); // Reduced from 4 to 3 seconds
-        
-        // Get initial session with shorter timeout
+        // Get initial session — single timeout to avoid competing timers
         const sessionPromise = supabase.auth.getSession();
-        const sessionTimeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Session fetch timeout')), 1500) // Reduced from 2000 to 1500
+        const sessionTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session fetch timeout')), 3000)
         );
         
         let initialSession = null;
@@ -80,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } else {
             initialSession = session;
           }
-        } catch (error) {
+        } catch {
           // Session fetch timeout - continue without session
         }
 
@@ -88,7 +80,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setSession(initialSession);
           setUser(initialSession?.user ?? null);
           
-          // Fetch profile if user exists (with timeout)
           if (initialSession?.user) {
             await fetchUserProfile(initialSession.user.id);
           }
@@ -98,7 +89,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } finally {
         if (mounted) {
           setLoading(false);
-          clearTimeout(timeoutId);
         }
       }
     };
@@ -109,13 +99,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .from('profiles')
           .select('*')
           .eq('user_id', userId)
-          .maybeSingle(); // Changed from .single() to .maybeSingle() to handle missing profiles
+          .maybeSingle();
         
-        const profileTimeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Profile fetch timeout')), 3000) // Reduced from 5000 to 3000
+        const profileTimeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
         );
         
-        let profileData = null;
         try {
           const { data, error } = await Promise.race([
             profilePromise,
@@ -123,12 +112,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ]) as any;
           
           if (data && !error && mounted) {
-            profileData = data;
             setProfile(data as Profile);
           } else if (error) {
             console.error('Error fetching profile:', error);
           }
-        } catch (error) {
+        } catch {
           // Profile fetch timeout - continue without profile
         }
       } catch (error) {
@@ -165,7 +153,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
@@ -349,7 +336,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .from('profiles')
             .select('*')
             .eq('user_id', data.user.id)
-            .single();
+            .maybeSingle();
           
           if (profileData && !profileError) {
             setProfile(profileData as Profile);
@@ -505,7 +492,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from('profiles')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
       
       if (profileData) {
         setProfile(profileData as Profile);
@@ -520,10 +507,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   }, [user, toast]);
 
-  const updateUserPassword = useCallback(async (email: string, _newPassword: string) => {
-    // Delegates to resetPassword — sends a secure reset link via email
-    return resetPassword(email);
-  }, [resetPassword]);
+  const updateUserPassword = useCallback(async (_email: string, newPassword: string) => {
+    // Updates the authenticated user's password directly
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      toast({ title: "Password update failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Password updated", description: "Your password has been changed successfully." });
+    }
+    return { error };
+  }, [toast]);
 
   // Memoized context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({

@@ -80,7 +80,7 @@ export async function createSubjectWithUnits(
         try {
           const fileExt = unit.pdfFile.name.split('.').pop();
           const fileName = `${userId}/${subjectData.id}/unit-${i + 1}/${Date.now()}.${fileExt}`;
-          
+
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('syllabus-files')
             .upload(fileName, unit.pdfFile);
@@ -89,10 +89,10 @@ export async function createSubjectWithUnits(
           fileUrl = uploadData.path;
 
           onProgress?.(progress + 5, `Extracting content from Unit ${i + 1} PDF...`);
-          
-          // Use real PDF extraction
+
+          // Try real extraction first
           const realExtraction = await extractRealPDFContent(unit.pdfFile);
-          
+
           if (realExtraction.success && realExtraction.text.length > 100) {
             extractedContent = {
               text: realExtraction.text,
@@ -101,11 +101,19 @@ export async function createSubjectWithUnits(
               subject: unit.name
             };
           } else {
-            extractedContent = await extractPDFContent(unit.pdfFile);
+            // Fallback to pdf-processor (same real extraction, different entry point)
+            const fallback = await extractPDFContent(unit.pdfFile);
+            extractedContent = fallback;
           }
-          
-        } catch (error) {
-          // PDF processing failed silently, unit saved without content
+
+        } catch (error: any) {
+          // Clean up uploaded file and subject on failure
+          if (fileUrl) await supabase.storage.from('syllabus-files').remove([fileUrl]).catch(() => {});
+          await supabase.from('subjects').delete().eq('id', subjectData.id).catch(() => {});
+          throw new Error(
+            error?.message ||
+            `Failed to extract content from Unit ${i + 1} PDF. Please upload a text-based PDF.`
+          );
         }
       }
 
@@ -138,9 +146,8 @@ export async function createSubjectWithUnits(
       ...subjectData,
       units
     };
-
-  } catch (error) {
-    throw error;
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -208,7 +215,151 @@ export async function getPDFFilesForUnits(
 }
 
 /**
- * Generates AI prompt from subject units' extracted content
+ * Extracts PDF content for all selected units — returns the cleaned text.
+ * Used by QuestionPaperConfig to generate per-part prompts.
+ */
+export async function extractContentForUnits(
+  subject: Subject,
+  selectedUnits: string[],
+  unitWeightages: Record<string, number>
+): Promise<string> {
+  if (!subject.units) throw new Error('Subject has no units');
+  const relevantUnits = subject.units.filter(unit => selectedUnits.includes(unit.id));
+  if (relevantUnits.length === 0) throw new Error('No units selected');
+
+  // 5000 chars per unit — enough for real questions
+  const perUnitBudget = Math.min(5000, Math.floor(15000 / relevantUnits.length));
+  let contentSections = '';
+
+  for (const unit of relevantUnits) {
+    const weightage = unitWeightages[unit.id] || 0;
+    contentSections += `\n\n=== ${unit.unit_name} (${weightage}%) ===\n`;
+    let actualContent = '';
+
+    if (!unit.extracted_content?.text || unit.extracted_content.text.length < 100) {
+      if (unit.file_url) {
+        try {
+          const { data: fileData, error } = await supabase.storage.from('syllabus-files').download(unit.file_url);
+          if (error) throw new Error(`Could not download PDF for "${unit.unit_name}".`);
+          const pdfFile = new File([fileData], unit.unit_name + '.pdf', { type: 'application/pdf' });
+          const { extractRealPDFContent } = await import('./pdf-extractor-real');
+          const extraction = await extractRealPDFContent(pdfFile);
+          if (!extraction.success || extraction.text.length < 100) {
+            throw new Error(extraction.error || `Could not extract text from "${unit.unit_name}". Please re-upload a text-based PDF.`);
+          }
+          actualContent = extraction.text;
+          await supabase.from('units').update({ extracted_content: { text: extraction.text, numPages: extraction.numPages } }).eq('id', unit.id);
+        } catch (e: any) {
+          throw new Error(e?.message || `Failed to load content for "${unit.unit_name}".`);
+        }
+      } else {
+        throw new Error(`No PDF uploaded for "${unit.unit_name}". Please go back and upload a PDF.`);
+      }
+    } else {
+      actualContent = unit.extracted_content.text;
+    }
+
+    const cleaned = cleanPDFText(actualContent);
+    contentSections += cleaned.length > perUnitBudget ? cleaned.substring(0, perUnitBudget) : cleaned;
+  }
+  return contentSections;
+}
+
+/**
+ * Builds a focused prompt for a single part — small enough to complete within Vercel timeout.
+ */
+export function buildPartPrompt(
+  subjectName: string,
+  contentSections: string,
+  part: { name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean; scenarioQuestions?: number },
+  startQNum: number
+): string {
+  const count = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
+  const endQNum = startQNum + count - 1;
+
+  const diffStyle = part.difficulty === 'easy'
+    ? 'EASY — simple and straightforward. Mix of: simple calculations, basic definitions, short theory, simple diagrams. Keep questions simple.'
+    : part.difficulty === 'medium'
+    ? 'MEDIUM — moderate complexity. Mix of: multi-step calculations, detailed explanations, comparisons, process descriptions, moderate diagrams.'
+    : 'HARD — high complexity. Mix of: complex calculations with derivations, deep analysis, design problems, comprehensive theory, detailed diagrams.';
+
+  const scenarioNote = (part.scenarioQuestions ?? 0) > 0
+    ? `\nSCENARIO: ${part.scenarioQuestions} questions must start with a 2-3 sentence real-world context, then ask a question from it. Format: Q[n]. [Scenario: context] Question | Bloom | CO[2-4]`
+    : '';
+
+  return `Generate EXACTLY ${count} exam questions (Q${startQNum} to Q${endQNum}) from the PDF content below.
+${diffStyle}${scenarioNote}
+
+RULES:
+- Use ONLY specific terms, formulas, algorithms, examples from the PDF
+- Do NOT use general knowledge or add examples not in the PDF
+- Do NOT mention the subject name in questions
+- Format: Q${startQNum}. question | Bloom | CO2 (CO must be CO2, CO3, or CO4)
+
+=== PDF CONTENT ===
+${contentSections.substring(0, 6000)}
+=== END ===
+
+Generate Q${startQNum} to Q${endQNum} now:`;
+}
+
+/**
+ * Builds ONE combined prompt for all parts — single API call, no rate limiting.
+ * Content is capped at 3000 chars so total prompt stays under Groq's TPM limit.
+ */
+export function buildCombinedPrompt(
+  subjectName: string,
+  contentSections: string,
+  parts: Array<{ name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean; scenarioQuestions?: number }>
+): string {
+  const totalQ = parts.reduce((s, p) => s + (p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions), 0);
+
+  let qNum = 1;
+  const partLines = parts.map(p => {
+    const count = p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions;
+    const end = qNum + count - 1;
+    const style = p.difficulty === 'easy'
+      ? 'EASY: simple recall, basic definitions, straightforward questions'
+      : p.difficulty === 'medium'
+      ? 'MEDIUM: explanations, comparisons, process descriptions, moderate calculations'
+      : 'HARD: complex analysis, derivations, multi-step calculations, design problems';
+    const scenario = (p.scenarioQuestions ?? 0) > 0
+      ? ` [${p.scenarioQuestions} must be scenario-based: write 2-sentence context then ask question]`
+      : '';
+    const line = `${p.name}: Q${qNum}–Q${end} | ${style}${scenario}`;
+    qNum += count;
+    return line;
+  }).join('\n');
+
+  // Cap content at 2000 chars — leaves enough tokens for 25 questions output
+  const content = contentSections.substring(0, 2000);
+
+  return `Generate EXACTLY ${totalQ} exam questions from the PDF content below.
+
+PARTS:
+${partLines}
+
+=== PDF CONTENT ===
+${content}
+=== END ===
+
+STRICT FORMAT — every line must look exactly like this:
+Q1. What is Gini Index? | Remember | CO2
+Q2. Explain how decision trees handle overfitting. | Understand | CO3
+Q3. Calculate the entropy for a node with 5 positive and 3 negative examples. | Apply | CO4
+
+RULES:
+- Use ONLY terms, formulas, algorithms from the PDF above
+- Do NOT use general knowledge
+- Do NOT mention the subject name in questions
+- Bloom must be one of: Remember, Understand, Apply, Analyze, Evaluate, Create
+- CO must be exactly CO2, CO3, or CO4
+
+Generate Q1 to Q${totalQ}:`;
+}
+
+/**
+ * Legacy function — kept for compatibility
  */
 export async function generatePromptFromSubjectUnits(
   subject: Subject,
@@ -218,531 +369,213 @@ export async function generatePromptFromSubjectUnits(
     totalQuestions: number;
     totalMarks: number;
     difficulty: string;
-    parts: Array<{ name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean }>;
+    parts: Array<{ name: string; questions: number; marks: number; difficulty: 'easy' | 'medium' | 'hard'; choicesEnabled: boolean; scenarioQuestions?: number }>;
   }
 ): Promise<string> {
-  if (!subject.units) {
-    throw new Error('Subject has no units');
+  const contentSections = await extractContentForUnits(subject, selectedUnits, unitWeightages);
+  // Return first part prompt for backward compatibility
+  if (questionConfig.parts.length > 0) {
+    return buildPartPrompt(subject.subject_name, contentSections, questionConfig.parts[0], 1);
   }
-
-  const relevantUnits = subject.units.filter(unit => 
-    selectedUnits.includes(unit.id)
-  );
-
-  if (relevantUnits.length === 0) {
-    throw new Error('No units selected');
-  }
-
-  let contentSections = '';
-  
-  // Smart content extraction: take key sentences from each unit, not raw dump
-  // Cap at 4000 chars total so the AI has enough output budget for all questions
-  const totalContentBudget = 4000;
-  const perUnitBudget = Math.floor(totalContentBudget / Math.max(relevantUnits.length, 1));
-
-  for (const unit of relevantUnits) {
-    const weightage = unitWeightages[unit.id] || 0;
-    contentSections += `\n\n=== ${unit.unit_name} (${weightage}%) ===\n`;
-
-    let actualContent = '';
-
-    if (!unit.extracted_content?.text || unit.extracted_content.text.length < 100) {
-      if (unit.file_url) {
-        try {
-          const { data: fileData, error: downloadError } = await supabase.storage
-            .from('syllabus-files')
-            .download(unit.file_url);
-          if (downloadError) throw downloadError;
-          if (fileData) {
-            const pdfFile = new File([fileData], unit.unit_name + '.pdf', { type: 'application/pdf' });
-            const { extractRealPDFContent } = await import('./pdf-extractor-real');
-            const extraction = await extractRealPDFContent(pdfFile);
-            if (extraction.success && extraction.text.length > 100) {
-              actualContent = extraction.text;
-              await supabase.from('units').update({
-                extracted_content: { text: extraction.text, numPages: extraction.numPages }
-              }).eq('id', unit.id);
-            } else {
-              throw new Error(`Could not extract text from the PDF for "${unit.unit_name}". The PDF may be image-based or scanned. Please re-upload a text-based PDF.`);
-            }
-          } else {
-            throw new Error(`Could not download the PDF for "${unit.unit_name}". Please re-upload the PDF in Subject Setup.`);
-          }
-        } catch (emergencyError: any) {
-          throw new Error(emergencyError?.message || `Failed to load PDF content for "${unit.unit_name}". Please re-upload the PDF.`);
-        }
-      } else {
-        throw new Error(`No PDF uploaded for "${unit.unit_name}". Please go to Subject Setup and upload a PDF for this unit.`);
-      }
-    } else {
-      actualContent = unit.extracted_content.text;
-    }
-
-    // Extract the most informative sentences — definitions, key terms, headings
-    const extracted = extractKeyContent(actualContent, perUnitBudget);
-    contentSections += extracted;
-  }
-  
-  let totalQuestionsToGenerate = 0;
-  questionConfig.parts.forEach(part => {
-    const questionsToGenerate = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
-    totalQuestionsToGenerate += questionsToGenerate;
-  });
-
-  const prompt = `You are a university professor. Generate EXACTLY ${totalQuestionsToGenerate} exam questions from the study material below. You MUST generate ALL ${totalQuestionsToGenerate} questions — do not stop early.
-
-SUBJECT: ${subject.subject_name} | TOTAL MARKS: ${questionConfig.totalMarks}
-
-PARTS — generate EXACTLY these counts:
-${questionConfig.parts.map((part, idx) => {
-  const questionsToGenerate = part.choicesEnabled ? Math.ceil(part.questions * 1.5) : part.questions;
-  const startNum = idx === 0 ? 1 : questionConfig.parts.slice(0, idx).reduce((sum, p) => sum + (p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions), 0) + 1;
-  const endNum = startNum + questionsToGenerate - 1;
-  return `${part.name}: ${questionsToGenerate} questions (Q${startNum}–Q${endNum}), ${part.marks} marks, ${part.difficulty} difficulty`;
-}).join('\n')}
-
-STUDY MATERIAL:
-${contentSections}
-
-RULES:
-- Use ONLY concepts from the study material above
-- Never say "according to the text" or "as mentioned"
-- Use exact terms, names, algorithms from the material
-- Format: Q[n]. [question text] | [Bloom level] | CO[2-4]
-- Bloom levels: Remember/Understand/Apply/Analyze/Evaluate/Create
-- ${questionConfig.parts.map(p => `${p.name}: ${p.difficulty === 'easy' ? 'Remember/Understand' : p.difficulty === 'medium' ? 'Apply/Analyze' : 'Analyze/Evaluate/Create'}`).join(', ')}
-
-GENERATE ALL ${totalQuestionsToGenerate} QUESTIONS NOW (Q1 through Q${totalQuestionsToGenerate}):`;
-
-  return prompt;
+  return contentSections;
 }
 
 /**
- * Extract the most informative content from raw PDF text.
- * Prioritises: headings, definitions, numbered lists, key sentences.
- * Keeps output within budget so the AI has room to generate all questions.
+ * Smart full-document content extractor.
+ *
+ * Strategy:
+ * 1. Split the full PDF text into "sections" by detecting headings
+ * 2. Score every section based on how much important content it has
+ * 3. Pick the highest-scoring sections from ANYWHERE in the document
+ * 4. Within each selected section, keep the most informative sentences
+ * 5. Reassemble in original document order so context is preserved
+ *
+ * This ensures important topics from page 1, page 10, or page 20 are all captured.
  */
-function extractKeyContent(text: string, budget: number): string {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const scored: Array<{ line: string; score: number }> = [];
+function extractImportantContent(fullText: string, budget: number): string {
+  // Step 1: Clean noise first
+  const lines = fullText
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => {
+      if (l.length < 4) return false;
+      if (/^[\d\s\.\-\|]+$/.test(l)) return false;           // pure numbers/separators
+      if (/^(page\s*\d|figure\s*\d|fig\.\s*\d|table\s*\d)/i.test(l)) return false;
+      if (/^(www\.|http|©|®|™|isbn|doi:)/i.test(l)) return false;
+      if (/^references?$|^bibliography$/i.test(l)) return false;
+      return true;
+    });
 
-  for (const line of lines) {
-    let score = 0;
-    const lower = line.toLowerCase();
+  if (lines.length === 0) return fullText.substring(0, budget);
 
-    // Headings / chapter titles
-    if (/^(chapter|unit|section|\d+\.|[A-Z][A-Z\s]{4,})/.test(line)) score += 5;
-    // Definitions
-    if (/\b(is defined as|refers to|is called|means|definition|denoted by)\b/.test(lower)) score += 4;
-    // Key terms with colons
-    if (/^[A-Za-z\s]{3,30}:\s/.test(line)) score += 3;
-    // Numbered or bulleted items
-    if (/^[\d\-\*•]\s/.test(line)) score += 2;
-    // Contains technical keywords
-    if (/\b(algorithm|formula|equation|theorem|method|technique|process|function|model|network|layer|node|tree|graph|matrix|vector|probability|entropy|gradient|loss|accuracy|precision|recall)\b/.test(lower)) score += 2;
-    // Long informative sentences
-    if (line.length > 60 && line.length < 300) score += 1;
-    // Skip very short or very long lines
-    if (line.length < 15 || line.length > 500) score -= 2;
+  // Step 2: Group lines into sections by detecting headings
+  const sections: Array<{ heading: string; lines: string[]; startIdx: number }> = [];
+  let currentSection: { heading: string; lines: string[]; startIdx: number } = {
+    heading: 'Introduction',
+    lines: [],
+    startIdx: 0,
+  };
 
-    if (score > 0) scored.push({ line, score });
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isHeading(line)) {
+      if (currentSection.lines.length > 0) {
+        sections.push(currentSection);
+      }
+      currentSection = { heading: line, lines: [], startIdx: i };
+    } else {
+      currentSection.lines.push(line);
+    }
+  }
+  if (currentSection.lines.length > 0) sections.push(currentSection);
+
+  // If no sections detected, treat whole document as one section
+  if (sections.length === 0) {
+    return lines.join('\n').substring(0, budget);
   }
 
-  // Sort by score descending, then take top lines within budget
-  scored.sort((a, b) => b.score - a.score);
+  // Step 3: Score each section
+  const scored = sections.map(section => ({
+    ...section,
+    score: scoreSection(section.heading, section.lines),
+  }));
 
-  let result = '';
-  for (const { line } of scored) {
-    if (result.length + line.length + 1 > budget) break;
-    result += line + '\n';
+  // Step 4: Sort by score to find most important sections
+  const sortedByScore = [...scored].sort((a, b) => b.score - a.score);
+
+  // Step 5: Pick top sections until budget is filled,
+  // but track original indices to reassemble in document order
+  const selectedIndices = new Set<number>();
+  let usedBudget = 0;
+
+  for (const section of sortedByScore) {
+    const sectionText = section.heading + '\n' + section.lines.join('\n');
+    const sectionSize = sectionText.length;
+
+    if (usedBudget + sectionSize <= budget) {
+      selectedIndices.add(section.startIdx);
+      usedBudget += sectionSize;
+    } else if (usedBudget < budget * 0.5) {
+      // If we haven't filled even half the budget, take a trimmed version
+      selectedIndices.add(section.startIdx);
+      usedBudget = budget; // stop after this
+      break;
+    }
+
+    if (usedBudget >= budget) break;
   }
 
-  // If nothing scored well, just take the first `budget` chars
-  if (result.length < 200) {
-    return text.substring(0, budget);
-  }
+  // Step 6: Reassemble in original document order
+  const result = scored
+    .filter(s => selectedIndices.has(s.startIdx))
+    .sort((a, b) => a.startIdx - b.startIdx)
+    .map(s => {
+      const sectionText = s.heading + '\n' + s.lines.join('\n');
+      // Within each section, keep the most informative sentences
+      return trimSectionToImportant(s.heading, s.lines, Math.floor(budget / Math.max(selectedIndices.size, 1)));
+    })
+    .join('\n\n');
 
-  return result;
+  return result.length > 0 ? result : lines.join('\n').substring(0, budget);
 }
 
-function generateRealisticContent(unitName: string): string {
-  const unitLower = unitName.toLowerCase();
-  
-  // PRIORITY FIX: Check for UE subject or physics-related terms first
-  if (unitLower.includes('ue') || unitLower.includes('physics') || unitLower.includes('laser') || unitLower.includes('optics')) {
-    return `LASER TECHNOLOGY AND OPTICAL PHYSICS - COMPREHENSIVE STUDY MATERIAL
-
-CHAPTER 1: INTRODUCTION TO LASER SYSTEMS
-A laser (Light Amplification by Stimulated Emission of Radiation) is a device that emits light through a process of optical amplification based on the stimulated emission of electromagnetic radiation. The fundamental principle behind laser operation involves three key processes: absorption, spontaneous emission, and stimulated emission.
-
-Key Concepts:
-- Stimulated Emission: The process where an excited atom releases a photon identical to an incident photon
-- Population Inversion: A condition where more atoms are in excited states than in ground states
-- Optical Resonator: Mirror system that provides optical feedback for laser amplification
-- Active Medium: The material that amplifies light (gas, liquid, solid, or semiconductor)
-
-CHAPTER 2: LASER COMPONENTS AND OPERATION
-Every laser system consists of three essential components:
-
-1. Active Medium: The material that amplifies light
-   - Gas lasers: Helium-neon, argon, carbon dioxide
-   - Solid-state lasers: Ruby, Nd:YAG, Ti:sapphire
-   - Semiconductor lasers: Diode lasers, quantum cascade lasers
-   - Fiber lasers: Rare earth-doped optical fibers
-
-2. Pumping Mechanism: Energy source that excites atoms
-   - Optical pumping: Using light to excite atoms
-   - Electrical pumping: Using electric current
-   - Chemical pumping: Using chemical reactions
-   - Thermal pumping: Using heat energy
-
-3. Optical Resonator: Mirror configuration
-   - Fabry-Perot cavity: Two parallel mirrors
-   - Ring cavity: Circular mirror arrangement
-   - Distributed feedback: Periodic structures
-
-CHAPTER 3: LASER CHARACTERISTICS
-Laser light has unique properties that distinguish it from conventional light sources:
-
-Coherence: Laser light maintains phase relationships over long distances
-- Temporal coherence: Narrow spectral linewidth
-- Spatial coherence: Well-defined wavefront
-
-Monochromaticity: Extremely narrow spectral width
-- Single frequency operation
-- Wavelength stability
-- Frequency control methods
-
-Directionality: Highly collimated beam
-- Low beam divergence
-- Gaussian beam profile
-- Beam quality factors
-
-High Intensity: Concentrated energy density
-- Power density calculations
-- Intensity distribution
-- Beam focusing techniques
-
-CHAPTER 4: TYPES OF LASER SYSTEMS
-Gas Lasers:
-- Helium-Neon (HeNe): 632.8 nm red light, continuous wave operation
-- Carbon Dioxide (CO2): 10.6 μm infrared, high power industrial applications
-- Argon Ion: Multiple visible wavelengths, scientific applications
-- Excimer: Ultraviolet wavelengths, semiconductor processing
-
-Solid-State Lasers:
-- Ruby Laser: 694.3 nm, first laser demonstrated
-- Nd:YAG: 1064 nm, versatile industrial and medical applications
-- Ti:Sapphire: Tunable near-infrared, ultrafast pulse generation
-- Fiber Lasers: Compact, efficient, telecommunications
-
-Semiconductor Lasers:
-- Diode Lasers: Compact, efficient, telecommunications
-- Quantum Cascade: Mid-infrared, spectroscopy applications
-- VCSEL: Vertical cavity surface emitting, data communications
-
-CHAPTER 5: LASER APPLICATIONS
-Medical Applications:
-- Surgical procedures: Precision cutting, cauterization
-- Therapy: Photodynamic therapy, laser therapy
-- Diagnostics: Optical coherence tomography, fluorescence
-- Ophthalmology: Vision correction, retinal treatment
-
-Industrial Applications:
-- Material processing: Cutting, welding, drilling, marking
-- Manufacturing: Additive manufacturing, surface treatment
-- Quality control: Measurement, inspection, testing
-- Communications: Fiber optic systems, free-space links
-
-Scientific Research:
-- Spectroscopy: Atomic and molecular analysis
-- Interferometry: Precision measurements
-- Holography: Three-dimensional imaging
-- Nonlinear optics: Frequency conversion, pulse compression
-
-CHAPTER 6: LASER SAFETY
-Laser safety is critical due to the concentrated energy in laser beams:
-
-Classification System:
-- Class 1: Safe under normal operating conditions
-- Class 1M: Safe for naked eye, hazardous with optical instruments
-- Class 2: Low power visible lasers, blink reflex protection
-- Class 2M: Low power visible, hazardous with optical instruments
-- Class 3R: Moderate power, direct viewing hazardous
-- Class 3B: Hazardous for direct viewing, diffuse reflections safe
-- Class 4: High power, hazardous for eyes and skin
-
-Safety Measures:
-- Engineering controls: Enclosures, interlocks, beam stops
-- Administrative controls: Training, procedures, signage
-- Personal protective equipment: Safety glasses, clothing
-- Medical surveillance: Eye examinations, incident reporting
-
-This comprehensive material covers all fundamental aspects of laser technology and optical physics.`;
-  }
-  
-  if (unitLower.includes('hack') || unitLower.includes('security') || unitLower.includes('cyber')) {
-    return `ETHICAL HACKING AND CYBERSECURITY - COMPREHENSIVE STUDY MATERIAL
-
-CHAPTER 1: FUNDAMENTALS OF ETHICAL HACKING
-Ethical hacking, also known as penetration testing or white-hat hacking, is the practice of intentionally probing systems and networks to find security vulnerabilities that malicious hackers could exploit.
-
-Definition: Ethical hacking is the authorized practice of bypassing system security to identify potential data breaches and threats in a network.
-
-Types of Hackers:
-1. White Hat Hackers: Ethical security professionals who help organizations improve security
-2. Black Hat Hackers: Malicious cybercriminals who exploit systems for personal gain
-3. Gray Hat Hackers: Individuals who operate between ethical and malicious boundaries
-
-CHAPTER 2: PENETRATION TESTING METHODOLOGY
-The penetration testing process consists of five distinct phases:
-
-Phase 1: Reconnaissance (Information Gathering)
-- Passive information gathering about the target organization
-- Social media research and public records analysis
-- DNS enumeration and network mapping
-
-Phase 2: Scanning and Enumeration
-- Network scanning using tools like Nmap
-- Port scanning to identify open services
-- Service enumeration to gather detailed information
-
-Phase 3: Vulnerability Assessment
-- Identifying security weaknesses in systems
-- Using automated vulnerability scanners
-- Manual testing for complex vulnerabilities
-
-Phase 4: Exploitation
-- Attempting to gain unauthorized access
-- Using frameworks like Metasploit
-- Privilege escalation techniques
-
-Phase 5: Post-Exploitation and Reporting
-- Maintaining access for further testing
-- Documenting findings and recommendations
-- Preparing comprehensive security reports
-
-CHAPTER 3: ESSENTIAL SECURITY TOOLS
-Network Discovery Tools:
-- Nmap: Network discovery and security auditing tool for identifying live hosts and open ports
-- Netstat: Command-line tool for displaying network connections and routing tables
-- Wireshark: Network protocol analyzer for capturing and analyzing network traffic
-
-Penetration Testing Frameworks:
-- Metasploit: Comprehensive penetration testing framework with exploit modules
-- Cobalt Strike: Advanced threat emulation software for red team operations
-- Empire: PowerShell-based post-exploitation framework
-
-Web Application Testing:
-- Burp Suite: Integrated platform for web application security testing
-- OWASP ZAP: Open-source web application security scanner
-- SQLmap: Automated tool for detecting and exploiting SQL injection vulnerabilities
-
-CHAPTER 4: COMMON SECURITY VULNERABILITIES
-SQL Injection Attacks:
-- Definition: Code injection technique exploiting vulnerabilities in database queries
-- Types: Union-based, Boolean-based, Time-based, Error-based injections
-- Prevention: Parameterized queries, input validation, least privilege principles
-
-Cross-Site Scripting (XSS):
-- Stored XSS: Malicious scripts permanently stored on target servers
-- Reflected XSS: Scripts reflected off web servers in error messages or search results
-- DOM-based XSS: Client-side code modification through malicious scripts
-
-Buffer Overflow Attacks:
-- Stack-based buffer overflows targeting function return addresses
-- Heap-based buffer overflows exploiting dynamic memory allocation
-- Protection mechanisms: ASLR, DEP, stack canaries
-
-Social Engineering Techniques:
-- Phishing: Fraudulent attempts to obtain sensitive information
-- Pretexting: Creating fabricated scenarios to engage victims
-- Baiting: Offering something enticing to spark curiosity
-
-CHAPTER 5: LEGAL AND ETHICAL CONSIDERATIONS
-Authorization Requirements:
-- Always obtain written permission before conducting security tests
-- Define scope and limitations of testing activities
-- Establish clear rules of engagement
-
-Professional Standards:
-- Follow industry frameworks like OWASP Testing Guide
-- Maintain professional certifications (CEH, CISSP, OSCP)
-- Adhere to responsible disclosure practices
-
-Compliance and Regulations:
-- Understanding legal implications of security testing
-- Compliance with data protection regulations
-- Industry-specific security requirements
-
-This comprehensive material covers all essential aspects of ethical hacking and cybersecurity testing methodologies.`;
-  }
-  
-  if (unitLower.includes('sql') || unitLower.includes('database')) {
-    return `SQL AND DATABASE MANAGEMENT SYSTEMS - COMPLETE REFERENCE
-
-CHAPTER 1: INTRODUCTION TO DATABASE SYSTEMS
-A database is a structured collection of data that is stored and accessed electronically. Database Management Systems (DBMS) are software applications that interact with users, applications, and the database itself to capture and analyze data.
-
-Core Database Concepts:
-- Database: Organized collection of structured information stored electronically
-- Table: Collection of related data entries consisting of rows and columns
-- Record (Row): Individual entry in a table containing related information
-- Field (Column): Specific attribute or piece of information in a record
-- Schema: Logical structure that defines database organization
-
-CHAPTER 2: SQL FUNDAMENTALS
-SQL (Structured Query Language) is the standard language for managing relational databases, developed by IBM in the 1970s.
-
-SQL Command Categories:
-1. Data Definition Language (DDL):
-   - CREATE: Creates new database objects (tables, indexes, views)
-   - ALTER: Modifies existing database structures
-   - DROP: Deletes database objects permanently
-   - TRUNCATE: Removes all records from a table quickly
-
-2. Data Manipulation Language (DML):
-   - SELECT: Retrieves data from one or more tables
-   - INSERT: Adds new records to tables
-   - UPDATE: Modifies existing records
-   - DELETE: Removes specific records from tables
-
-3. Data Control Language (DCL):
-   - GRANT: Provides user access privileges to database objects
-   - REVOKE: Removes user access privileges
-
-CHAPTER 3: DATABASE DESIGN AND RELATIONSHIPS
-Primary and Foreign Keys:
-- Primary Key: Unique identifier for each record in a table
-- Foreign Key: Field that creates links between tables by referencing primary keys
-- Composite Key: Primary key consisting of multiple columns
-
-Relationship Types:
-- One-to-One: Each record in one table relates to exactly one record in another
-- One-to-Many: One record relates to multiple records in another table
-- Many-to-Many: Multiple records in each table can relate to multiple records in the other
-
-CHAPTER 4: ADVANCED SQL OPERATIONS
-SQL Joins for Combining Data:
-- INNER JOIN: Returns records with matching values in both tables
-- LEFT JOIN (LEFT OUTER JOIN): Returns all records from left table plus matched records from right
-- RIGHT JOIN (RIGHT OUTER JOIN): Returns all records from right table plus matched records from left
-- FULL OUTER JOIN: Returns all records when there's a match in either table
-- CROSS JOIN: Returns Cartesian product of both tables
-
-Subqueries and Nested Queries:
-- Scalar Subqueries: Return single values
-- Row Subqueries: Return single rows with multiple columns
-- Table Subqueries: Return multiple rows and columns
-- Correlated Subqueries: Reference columns from outer query
-
-Aggregate Functions:
-- COUNT(): Returns number of rows matching criteria
-- SUM(): Calculates total of numeric values
-- AVG(): Computes average of numeric values
-- MAX(): Finds maximum value in a column
-- MIN(): Finds minimum value in a column
-
-CHAPTER 5: DATABASE NORMALIZATION
-Normalization is the process of organizing data to reduce redundancy and improve data integrity.
-
-Normal Forms:
-- First Normal Form (1NF): Eliminates repeating groups and ensures atomic values
-- Second Normal Form (2NF): Eliminates partial dependencies on composite keys
-- Third Normal Form (3NF): Eliminates transitive dependencies
-- Boyce-Codd Normal Form (BCNF): Stricter version of 3NF addressing certain anomalies
-
-Database Constraints:
-- NOT NULL: Ensures columns cannot contain empty values
-- UNIQUE: Guarantees all values in a column are distinct
-- PRIMARY KEY: Combines NOT NULL and UNIQUE constraints
-- FOREIGN KEY: Maintains referential integrity between tables
-- CHECK: Validates data against specific conditions
-
-CHAPTER 6: PERFORMANCE OPTIMIZATION
-Index Management:
-- Clustered Index: Physically reorders table data based on key values
-- Non-clustered Index: Creates separate structure pointing to table rows
-- Composite Index: Covers multiple columns for complex queries
-- Unique Index: Ensures uniqueness while improving query performance
-
-Transaction Management and ACID Properties:
-- Atomicity: All operations in a transaction succeed or fail together
-- Consistency: Database remains in valid state after transactions
-- Isolation: Concurrent transactions don't interfere with each other
-- Durability: Committed transactions are permanently saved
-
-Query Optimization Techniques:
-- Proper indexing strategies for frequently queried columns
-- Query rewriting for improved performance
-- Statistics maintenance for query optimizer
-- Partitioning large tables for better performance
-
-This comprehensive material covers all fundamental and advanced aspects of SQL and database management systems.`;
-  }
-  
-  return `${unitName.toUpperCase()} - COMPREHENSIVE STUDY MATERIAL
-
-CHAPTER 1: INTRODUCTION TO ${unitName.toUpperCase()}
-This comprehensive document provides detailed coverage of ${unitName} concepts, principles, and practical applications in modern technology environments.
-
-Fundamental Concepts:
-- Core definitions and terminology specific to ${unitName}
-- Historical development and evolution of ${unitName}
-- Current industry standards and best practices
-- Theoretical foundations underlying ${unitName} principles
-
-CHAPTER 2: THEORETICAL FRAMEWORK
-Key Principles and Methodologies:
-- Fundamental theories governing ${unitName} operations
-- Mathematical models and computational approaches
-- Systematic methodologies for ${unitName} implementation
-- Analytical frameworks for problem-solving
-
-Research Approaches:
-- Quantitative analysis methods in ${unitName}
-- Qualitative research techniques
-- Experimental design and validation procedures
-- Data collection and interpretation strategies
-
-CHAPTER 3: PRACTICAL APPLICATIONS
-Real-World Implementation:
-- Industry case studies demonstrating ${unitName} applications
-- Commercial deployment strategies and considerations
-- Integration with existing systems and technologies
-- Performance metrics and evaluation criteria
-
-Tools and Technologies:
-- Software applications supporting ${unitName} operations
-- Hardware requirements and specifications
-- Development environments and platforms
-- Testing and validation tools
-
-CHAPTER 4: ADVANCED CONCEPTS
-Complex Methodologies:
-- Advanced techniques for ${unitName} optimization
-- Scalability considerations for large-scale implementations
-- Security aspects and risk management
-- Quality assurance and compliance requirements
-
-Innovation and Future Trends:
-- Emerging technologies impacting ${unitName}
-- Research frontiers and development opportunities
-- Market trends and industry evolution
-- Career development paths in ${unitName}
-
-CHAPTER 5: IMPLEMENTATION STRATEGIES
-Project Management:
-- Planning and resource allocation for ${unitName} projects
-- Risk assessment and mitigation strategies
-- Team coordination and communication protocols
-- Timeline management and milestone tracking
-
-Best Practices:
-- Industry-standard procedures for ${unitName} implementation
-- Quality control measures and validation processes
-- Documentation requirements and maintenance
-- Continuous improvement methodologies
-
-This material provides comprehensive coverage of ${unitName} from fundamental concepts to advanced implementation strategies.`;
+/** Detect if a line is a heading/subheading */
+function isHeading(line: string): boolean {
+  if (line.length < 3 || line.length > 120) return false;
+  // ALL CAPS heading
+  if (/^[A-Z][A-Z\s\d\-:]{4,}$/.test(line)) return true;
+  // Numbered heading: "1.", "1.1", "1.1.1", "Chapter 1", "Unit 1", "Section 1"
+  if (/^(\d+\.)+\s+\S/.test(line)) return true;
+  if (/^(chapter|unit|section|topic|module|part)\s+\d+/i.test(line)) return true;
+  // Short title-case line (likely a heading)
+  if (line.length < 60 && /^[A-Z][a-zA-Z\s\-:]+$/.test(line) && line.split(' ').length <= 8) return true;
+  return false;
 }
+
+/** Score a section based on how much important content it contains */
+function scoreSection(heading: string, lines: string[]): number {
+  let score = 0;
+  const text = lines.join(' ').toLowerCase();
+
+  // Heading importance
+  if (/^(chapter|unit|section|topic|module)/i.test(heading)) score += 10;
+  if (/\d+\.\d+/.test(heading)) score += 5; // numbered subheading
+
+  // Content richness signals
+  const definitionCount = (text.match(/\b(is defined as|refers to|is called|means|definition of|denoted by|known as)\b/g) || []).length;
+  score += definitionCount * 8;
+
+  const formulaCount = (text.match(/\b(formula|equation|calculate|compute|algorithm|steps?|procedure)\b/g) || []).length;
+  score += formulaCount * 6;
+
+  const exampleCount = (text.match(/\b(example|for instance|such as|e\.g\.|i\.e\.|consider|suppose|given)\b/g) || []).length;
+  score += exampleCount * 4;
+
+  const technicalCount = (text.match(/\b(algorithm|model|method|technique|approach|process|system|network|function|matrix|vector|probability|entropy|gradient|accuracy|precision|recall|classification|regression|clustering|optimization)\b/g) || []).length;
+  score += technicalCount * 3;
+
+  // Numbered/bulleted lists are usually key points
+  const listCount = lines.filter(l => /^[\d\-\*•]\s/.test(l)).length;
+  score += listCount * 2;
+
+  // Longer sections have more content
+  score += Math.min(lines.length, 20);
+
+  return score;
+}
+
+/** Within a section, keep the most informative sentences up to the budget */
+function trimSectionToImportant(heading: string, lines: string[], budget: number): string {
+  // Score each line
+  const scoredLines = lines.map(line => {
+    let s = 0;
+    const l = line.toLowerCase();
+    if (/\b(is defined as|refers to|is called|means|definition)\b/.test(l)) s += 10;
+    if (/\b(formula|equation|algorithm|steps?|procedure|calculate)\b/.test(l)) s += 8;
+    if (/\b(example|for instance|such as|e\.g\.|consider)\b/.test(l)) s += 6;
+    if (/\b(important|key|main|primary|fundamental|essential|critical)\b/.test(l)) s += 5;
+    if (/^[\d\-\*•]\s/.test(line)) s += 4;  // list item
+    if (line.length > 50 && line.length < 300) s += 2;
+    if (line.length < 15) s -= 3;
+    return { line, score: s };
+  });
+
+  // Sort by score but keep track of original order
+  const withIndex = scoredLines.map((item, idx) => ({ ...item, idx }));
+  withIndex.sort((a, b) => b.score - a.score);
+
+  // Pick top lines within budget, then re-sort by original index
+  const selected: number[] = [];
+  let used = heading.length + 1;
+  for (const item of withIndex) {
+    if (used + item.line.length + 1 > budget) break;
+    selected.push(item.idx);
+    used += item.line.length + 1;
+  }
+  selected.sort((a, b) => a - b);
+
+  const body = selected.length > 0
+    ? selected.map(i => lines[i]).join('\n')
+    : lines.slice(0, Math.floor(budget / 80)).join('\n'); // fallback: first N lines
+
+  return `${heading}\n${body}`;
+}
+
+/**
+ * Clean raw PDF text — remove noise while preserving reading order.
+ */
+function cleanPDFText(text: string): string {
+  return text
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => {
+      if (l.length < 3) return false;
+      if (/^[\d\s\.\-]+$/.test(l)) return false;
+      if (/^(page|pg|figure|fig|table|ref|www\.|http)/i.test(l)) return false;
+      if (/^\s*[©®™]\s/.test(l)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
+

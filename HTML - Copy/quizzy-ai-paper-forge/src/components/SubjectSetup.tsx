@@ -9,12 +9,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { createSubjectWithUnits, type SubjectFormData } from '@/lib/subject-manager';
-import { Upload, FileText, Book, Brain, Zap, CheckCircle, AlertCircle, FileCheck } from 'lucide-react';
+import { Upload, FileText, Book, Brain, Zap, CheckCircle, AlertCircle, FileCheck, Eye } from 'lucide-react';
 
 interface UnitData {
   name: string;
   pdfFile?: File;
   weightage: number;
+  pdfPreviewUrl?: string; // Feature 12: PDF first-page preview
 }
 
 interface SubjectSetupProps {
@@ -82,7 +83,11 @@ export function SubjectSetup({ onSubjectCreated }: SubjectSetupProps) {
 
   const handleFileChange = (index: number, files: FileList | null) => {
     if (files && files[0]) {
-      updateUnit(index, 'pdfFile', files[0]);
+      const file = files[0];
+      const url = URL.createObjectURL(file);
+      const newUnits = [...units];
+      newUnits[index] = { ...newUnits[index], pdfFile: file, pdfPreviewUrl: url };
+      setUnits(newUnits);
     }
   };
 
@@ -182,7 +187,7 @@ export function SubjectSetup({ onSubjectCreated }: SubjectSetupProps) {
           <CardDescription>Configure subject details and upload syllabus materials</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6" noValidate>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label htmlFor="subjectName">Subject Name *</Label>
@@ -240,7 +245,6 @@ export function SubjectSetup({ onSubjectCreated }: SubjectSetupProps) {
                             accept=".pdf" 
                             onChange={(e) => handleFileChange(index, e.target.files)} 
                             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" 
-                            required
                           />
                           {unit.pdfFile ? (
                             <div className="flex items-center text-xs text-green-600 mt-1">
@@ -251,6 +255,18 @@ export function SubjectSetup({ onSubjectCreated }: SubjectSetupProps) {
                             <div className="flex items-center text-xs text-orange-600 mt-1">
                               <AlertCircle className="w-3 h-3 mr-1" />
                               PDF required for content extraction
+                            </div>
+                          )}
+                          {/* Feature 12: PDF Preview */}
+                          {unit.pdfPreviewUrl && (
+                            <div className="mt-2">
+                              <p className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><Eye className="w-3 h-3" />PDF Preview (first page)</p>
+                              <iframe
+                                src={`${unit.pdfPreviewUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                                className="w-full rounded border"
+                                style={{ height: '200px' }}
+                                title={`Preview of ${unit.pdfFile?.name}`}
+                              />
                             </div>
                           )}
                         </div>

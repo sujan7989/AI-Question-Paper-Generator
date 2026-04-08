@@ -1,4 +1,32 @@
 {
+  "functions": {
+    "api/nvidia.js": { "maxDuration": 60 },
+    "api/openrouter.js": { "maxDuration": 60 },
+    "api/gemini.js": { "maxDuration": 60 },
+    "api/anthropic.js": { "maxDuration": 60 },
+    "api/groq.js": { "maxDuration": 60 },
+    "api/nvidia-key.js": { "maxDuration": 10 }
+  },
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }

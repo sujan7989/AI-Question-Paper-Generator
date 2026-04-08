@@ -6,7 +6,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { User, Mail, Shield, BookOpen, Save, Loader2, GraduationCap, Calendar } from 'lucide-react';
+import { User, Mail, Shield, Save, Loader2, GraduationCap, Calendar, Building2 } from 'lucide-react';
+
+const DEPARTMENTS = [
+  "Computer Science & Engineering",
+  "Electronics & Communication Engineering",
+  "Electrical & Electronics Engineering",
+  "Mechanical Engineering",
+  "Civil Engineering",
+  "Information Technology",
+  "Artificial Intelligence & Data Science",
+  "Biotechnology",
+  "Mathematics",
+  "Physics",
+  "Chemistry",
+  "Other",
+]
 
 export function ProfilePage() {
   const { user, profile, updateProfile } = useAuth();
@@ -16,6 +31,7 @@ export function ProfilePage() {
   const [firstName, setFirstName] = useState(profile?.first_name || '');
   const [lastName, setLastName] = useState(profile?.last_name || '');
   const [subjectHandled, setSubjectHandled] = useState(profile?.subject_handled || '');
+  const [department, setDepartment] = useState((profile as any)?.department || '');
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -23,17 +39,17 @@ export function ProfilePage() {
       first_name: firstName,
       last_name: lastName,
       subject_handled: subjectHandled,
-    });
+      department,
+    } as any);
     setIsSaving(false);
-    if (!error) {
-      setIsEditing(false);
-    }
+    if (!error) setIsEditing(false);
   };
 
   const handleCancel = () => {
     setFirstName(profile?.first_name || '');
     setLastName(profile?.last_name || '');
     setSubjectHandled(profile?.subject_handled || '');
+    setDepartment((profile as any)?.department || '');
     setIsEditing(false);
   };
 
@@ -65,6 +81,9 @@ export function ProfilePage() {
                 {profile?.subject_handled && (
                   <Badge variant="outline">{profile.subject_handled}</Badge>
                 )}
+                {(profile as any)?.department && (
+                  <Badge variant="outline" className="text-blue-700 border-blue-300">{(profile as any).department}</Badge>
+                )}
               </div>
             </div>
           </div>
@@ -83,31 +102,31 @@ export function ProfilePage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>First Name</Label>
-              <Input
-                value={firstName}
-                onChange={e => setFirstName(e.target.value)}
-                disabled={!isEditing}
-                placeholder="First name"
-              />
+              <Input value={firstName} onChange={e => setFirstName(e.target.value)} disabled={!isEditing} placeholder="First name" />
             </div>
             <div className="space-y-2">
               <Label>Last Name</Label>
-              <Input
-                value={lastName}
-                onChange={e => setLastName(e.target.value)}
-                disabled={!isEditing}
-                placeholder="Last name"
-              />
+              <Input value={lastName} onChange={e => setLastName(e.target.value)} disabled={!isEditing} placeholder="Last name" />
             </div>
           </div>
           <div className="space-y-2">
+            <Label>Department</Label>
+            {isEditing ? (
+              <select
+                value={department}
+                onChange={e => setDepartment(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Select department</option>
+                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            ) : (
+              <Input value={department || 'Not set'} disabled />
+            )}
+          </div>
+          <div className="space-y-2">
             <Label>Subject Handled</Label>
-            <Input
-              value={subjectHandled}
-              onChange={e => setSubjectHandled(e.target.value)}
-              disabled={!isEditing}
-              placeholder="e.g., Mathematics, Computer Science"
-            />
+            <Input value={subjectHandled} onChange={e => setSubjectHandled(e.target.value)} disabled={!isEditing} placeholder="e.g., Data Structures, DBMS" />
           </div>
 
           <div className="flex gap-2 pt-2">
@@ -153,6 +172,13 @@ export function ProfilePage() {
             <div>
               <p className="text-xs text-muted-foreground">Institution</p>
               <p className="text-sm font-medium">Kalasalingam Academy of Research and Education</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+            <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
+            <div>
+              <p className="text-xs text-muted-foreground">Department</p>
+              <p className="text-sm font-medium">{(profile as any)?.department || department || 'Not set'}</p>
             </div>
           </div>
           <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">

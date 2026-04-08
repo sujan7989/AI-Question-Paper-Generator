@@ -15,82 +15,80 @@ export interface PDFExtractionResult {
  * Extract actual text content from PDF file
  */
 export async function extractRealPDFContent(file: File): Promise<PDFExtractionResult> {
-  console.log('═══════════════════════════════════════════════');
-  console.log('🔍 REAL PDF EXTRACTION STARTING...');
-  console.log('📄 File:', file.name);
-  console.log('📊 Size:', file.size, 'bytes');
-  console.log('📝 Type:', file.type);
-  console.log('═══════════════════════════════════════════════');
-  
+  let pdf: any = null;
   try {
-    // Convert file to ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
-    console.log('✅ File loaded into memory');
-    
-    // Load PDF document
+
     const loadingTask = pdfjsLib.getDocument({
       data: arrayBuffer,
       useSystemFonts: true,
-      disableFontFace: false
+      disableFontFace: false,
+      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/cmaps/',
+      cMapPacked: true,
     });
-    
-    const pdf = await loadingTask.promise;
-    console.log(`✅ PDF loaded: ${pdf.numPages} pages`);
-    
-    // Extract text from all pages
+
+    pdf = await loadingTask.promise;
+
     let fullText = '';
-    
+
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       try {
         const page = await pdf.getPage(pageNum);
         const textContent = await page.getTextContent();
-        
-        // Extract text items
-        const pageText = textContent.items
-          .map((item: any) => ('str' in item ? item.str : '') || '')
-          .join(' ')
-          .trim();
-        
-        if (pageText) {
-          fullText += `\n\n=== Page ${pageNum} ===\n${pageText}`;
-          console.log(`✅ Page ${pageNum}: ${pageText.length} characters extracted`);
+
+        // Preserve line structure by grouping items by their Y position
+        const itemsByLine: Record<number, string[]> = {};
+        for (const item of textContent.items as any[]) {
+          if (!('str' in item) || !item.str.trim()) continue;
+          const y = Math.round(item.transform[5]); // Y coordinate
+          if (!itemsByLine[y]) itemsByLine[y] = [];
+          itemsByLine[y].push(item.str);
         }
-        
+
+        // Sort lines top-to-bottom (descending Y in PDF coords)
+        const sortedYs = Object.keys(itemsByLine)
+          .map(Number)
+          .sort((a, b) => b - a);
+
+        const pageLines = sortedYs.map(y => itemsByLine[y].join(' ').trim()).filter(Boolean);
+        const pageText = pageLines.join('\n');
+
+        if (pageText.trim()) {
+          fullText += `\n\n=== Page ${pageNum} ===\n${pageText}`;
+        }
+
         page.cleanup();
-      } catch (pageError) {
-        console.warn(`⚠️ Failed to extract page ${pageNum}:`, pageError);
+      } catch {
+        // skip unreadable page
       }
     }
-    
-    // Clean up
-    pdf.destroy();
-    
-    // Sanitize text
+
+    // Sanitize — remove null bytes and control chars
     fullText = fullText
       .replace(/[\0]/g, '')
       .replace(/[\0-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .replace(/[\uD800-\uDFFF]/g, '')
       .trim();
-    
+
     if (fullText.length < 50) {
-      throw new Error('Extracted text is too short or empty');
+      return {
+        text: '',
+        numPages: pdf.numPages,
+        success: false,
+        error: 'This PDF appears to be image-based (scanned). Please upload a text-based PDF so content can be extracted.',
+      };
     }
-    
-    console.log(`✅ EXTRACTION SUCCESS: ${fullText.length} characters total`);
-    console.log(`📖 Preview: ${fullText.substring(0, 200)}...`);
-    
-    return {
-      text: fullText,
-      numPages: pdf.numPages,
-      success: true
-    };
-    
+
+    return { text: fullText, numPages: pdf.numPages, success: true };
+
   } catch (error) {
-    console.error('❌ PDF EXTRACTION FAILED:', error);
     return {
       text: '',
       numPages: 0,
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown PDF error',
     };
+  } finally {
+    if (pdf) { try { pdf.destroy(); } catch {} }
   }
 }

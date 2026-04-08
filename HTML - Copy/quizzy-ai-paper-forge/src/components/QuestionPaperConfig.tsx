@@ -11,11 +11,48 @@ import { useToast } from '@/hooks/use-toast';
 import { QuestionPaperPreview } from '@/components/QuestionPaperPreview';
 import { PapersList } from '@/components/PapersList';
 import { GeneratingAnimation } from '@/components/GeneratingAnimation';
-import { FileText, Plus, Trash2, Brain, Target, Eye, CheckCircle } from 'lucide-react';
+import { FileText, Plus, Trash2, Brain, Target, Eye, CheckCircle, Bookmark, Stamp } from 'lucide-react';
 import { generateQuestions, type ApiProvider } from '@/lib/ai';
 import { formatPaperContent, downloadPaperAsPDF, type QuestionPaper } from '@/lib/paper';
 import { getUserSubjects, generatePromptFromSubjectUnits, type Subject } from '@/lib/subject-manager';
 import { evaluateQuestions, type EvaluationReport } from '@/lib/evaluator';
+
+// ── Exam preset templates ──────────────────────────────────────────────────
+const EXAM_TEMPLATES: Array<{ label: string; totalMarks: number; parts: Part[] }> = [
+  {
+    label: 'Sessional I / II (50 marks)',
+    totalMarks: 50,
+    parts: [
+      { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy', scenarioQuestions: 0 },
+      { name: 'Part B', marks: 30, questions: 3, marksPerQuestion: 10, choicesEnabled: true, difficulty: 'medium', scenarioQuestions: 0 },
+    ],
+  },
+  {
+    label: 'End Semester (100 marks)',
+    totalMarks: 100,
+    parts: [
+      { name: 'Part A', marks: 20, questions: 10, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy', scenarioQuestions: 0 },
+      { name: 'Part B', marks: 30, questions: 6, marksPerQuestion: 5, choicesEnabled: true, difficulty: 'medium', scenarioQuestions: 0 },
+      { name: 'Part C', marks: 50, questions: 4, marksPerQuestion: 12.5, choicesEnabled: true, difficulty: 'hard', scenarioQuestions: 0 },
+    ],
+  },
+  {
+    label: 'Unit Test (25 marks)',
+    totalMarks: 25,
+    parts: [
+      { name: 'Part A', marks: 10, questions: 5, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy', scenarioQuestions: 0 },
+      { name: 'Part B', marks: 15, questions: 3, marksPerQuestion: 5, choicesEnabled: false, difficulty: 'medium', scenarioQuestions: 0 },
+    ],
+  },
+  {
+    label: 'Assignment / Quiz (20 marks)',
+    totalMarks: 20,
+    parts: [
+      { name: 'Part A', marks: 10, questions: 5, marksPerQuestion: 2, choicesEnabled: false, difficulty: 'easy', scenarioQuestions: 0 },
+      { name: 'Part B', marks: 10, questions: 2, marksPerQuestion: 5, choicesEnabled: false, difficulty: 'medium', scenarioQuestions: 0 },
+    ],
+  },
+];
 
 type ToastReturnType = {
   id: string;
@@ -65,16 +102,16 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
   const [error, setError] = useState<string | null>(null);
   const [unitWeightages, setUnitWeightages] = useState<{ [unitId: string]: number }>({});
   const [weightageError, setWeightageError] = useState<string | null>(null);
-  const [latestPaper, setLatestPaper] = useState<QuestionPaper | null>(() => {
-    try {
-      const saved = localStorage.getItem('lastPaper');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [latestPaper, setLatestPaper] = useState<QuestionPaper | null>(null);
   const [viewingAllPapers, setViewingAllPapers] = useState(false);
   const [evaluationReport, setEvaluationReport] = useState<EvaluationReport | null>(null);
+  const [showBloomsWarning, setShowBloomsWarning] = useState(false);
+  const [watermark, setWatermark] = useState<'none' | 'draft' | 'confidential'>('none');
+  const [savedTemplates, setSavedTemplates] = useState<Array<{ name: string; parts: typeof parts }>>(() => {
+    try { return JSON.parse(localStorage.getItem('paperTemplates') || '[]'); } catch { return []; }
+  });
+  // Feature 16: Custom paper title
+  const [paperTitle, setPaperTitle] = useState('');
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
 
@@ -241,8 +278,42 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
     return true;
   };
 
+  const saveTemplate = (name: string) => {
+    const updated = [...savedTemplates.filter(t => t.name !== name), { name, parts }];
+    setSavedTemplates(updated);
+    try { localStorage.setItem('paperTemplates', JSON.stringify(updated)); } catch {}
+    toast({ title: 'Template saved', description: `"${name}" saved for future use.` });
+  };
+
+  const loadTemplate = (template: { name: string; parts: typeof parts }) => {
+    setParts(template.parts);
+    toast({ title: 'Template loaded', description: `"${template.name}" configuration applied.` });
+  };
+
+  const deleteTemplate = (name: string) => {
+    const updated = savedTemplates.filter(t => t.name !== name);
+    setSavedTemplates(updated);
+    try { localStorage.setItem('paperTemplates', JSON.stringify(updated)); } catch {}
+  };
+
   const handleGenerate = async () => {
     if (!validateConfiguration()) return;
+
+    // Bloom's balance check
+    const easyCount = parts.filter(p => p.difficulty === 'easy').reduce((s, p) => s + p.questions, 0);
+    const hardCount = parts.filter(p => p.difficulty === 'hard').reduce((s, p) => s + p.questions, 0);
+    const totalQ = parts.reduce((s, p) => s + p.questions, 0);
+    const easyPct = totalQ > 0 ? Math.round((easyCount / totalQ) * 100) : 0;
+    if (easyPct > 70 && !showBloomsWarning) {
+      setShowBloomsWarning(true);
+      toast({
+        title: "⚠️ Bloom's Balance Warning",
+        description: `${easyPct}% of questions are Easy level. Consider adding more Medium/Hard questions for a balanced paper.`,
+      });
+      // Don't block — just warn, continue after 2s
+      await new Promise(r => setTimeout(r, 500));
+    }
+    setShowBloomsWarning(false);
 
     setIsGenerating(true);
     setError(null);
@@ -309,78 +380,53 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         parts
       };
 
-      // Get extracted content from selected units
-      const relevantUnits = selectedSubject.units.filter(unit => selectedUnits.includes(unit.id));
-      let combinedContent = '';
-      
-      for (const unit of relevantUnits) {
-        const weightage = unitWeightages[unit.id] || 0;
-        
-        if (unit.extracted_content?.text && unit.extracted_content.text.length > 100) {
-          combinedContent += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n${unit.extracted_content.text}`;
-        } else if (unit.file_url) {
-            try {
-              const { data: fileData, error: downloadError } = await supabase
-                .storage.from('syllabus-files').download(unit.file_url);
-              
-              if (downloadError) throw downloadError;
-              if (!fileData) throw new Error('No file data received');
-              
-              const pdfFile = new File([fileData], `${unit.unit_name}.pdf`, { type: 'application/pdf' });
-              const { extractRealPDFContent } = await import('@/lib/pdf-extractor-real');
-              const extraction = await extractRealPDFContent(pdfFile);
-              
-              if (extraction.success && extraction.text.length > 100) {
-                combinedContent += `\n\n=== ${unit.unit_name} (${weightage}% weightage) ===\n${extraction.text}`;
-                await supabase.from('units').update({
-                  extracted_content: { text: extraction.text, numPages: extraction.numPages }
-                }).eq('id', unit.id);
-              }
-            } catch (error) {
-              // Skip unit if extraction fails
-            }
-        }
-      }
-
-      if (combinedContent.length < 100) {
-        throw new Error('No PDF content found for selected units. Please ensure PDFs were uploaded during subject creation. Try re-uploading your PDFs.');
-      }
-
-      // Generate prompt and questions
-      const { generatePromptFromSubjectUnits } = await import('@/lib/subject-manager');
-      let prompt = await generatePromptFromSubjectUnits(
-        selectedSubject,
-        selectedUnits,
-        unitWeightages,
-        questionConfig
-      );
-
-      // Append scenario-based question instructions if any part has scenarioQuestions > 0
-      const scenarioParts = parts.filter(p => p.scenarioQuestions > 0);
-      if (scenarioParts.length > 0) {
-        const scenarioInstructions = scenarioParts.map(p =>
-          `- ${p.name}: Generate ${p.scenarioQuestions} SCENARIO-BASED question${p.scenarioQuestions > 1 ? 's' : ''}. ` +
-          `For each scenario question: first write a short real-world context/passage (2-4 sentences) based on the PDF content, ` +
-          `then ask a question derived from that scenario. ` +
-          `Format: Q[number]. [Scenario: <context passage>] [Question text] | [Bloom level] | CO[number]`
-        ).join('\n');
-
-        prompt += `\n\nSCENARIO-BASED QUESTION REQUIREMENTS:\n${scenarioInstructions}\n` +
-          `IMPORTANT: The remaining ${parts.reduce((s, p) => s + p.questions, 0) - scenarioParts.reduce((s, p) => s + p.scenarioQuestions, 0)} questions should be regular (non-scenario) questions as normal.`;
-      }
-
+      // ONE single Groq call for all parts — avoids rate limiting
+      const { extractContentForUnits, buildPartPrompt } = await import('@/lib/subject-manager');
       const { generateQuestions } = await import('@/lib/ai');
-      const generatedQuestions = await generateQuestions(apiProvider, prompt);
+
+      const pdfContent = await extractContentForUnits(selectedSubject, selectedUnits, unitWeightages);
+
+      // Build one combined prompt for all parts
+      const { buildCombinedPrompt } = await import('@/lib/subject-manager');
+      const combinedPrompt = buildCombinedPrompt(selectedSubject.subject_name, pdfContent, parts);
+      const generatedQuestions = await generateQuestions(apiProvider, combinedPrompt);
       
       const subjectName = selectedSubject.subject_name;
 
       if (!generatedQuestions || generatedQuestions.trim() === '') {
         throw new Error("The AI failed to generate questions. Please try a different provider or adjust your settings.");
       }
+
+      // Feature 5: Duplicate Question Detector — compare with past papers
+      try {
+        const { data: pastPapers } = await supabase
+          .from('question_papers')
+          .select('generated_questions')
+          .eq('subject_id', selectedSubjectId)
+          .limit(5);
+        if (pastPapers && pastPapers.length > 0) {
+          const newWords = new Set(generatedQuestions.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+          let maxSimilarity = 0;
+          for (const pp of pastPapers) {
+            const oldText = JSON.stringify(pp.generated_questions || '').toLowerCase();
+            const oldWords = new Set(oldText.split(/\W+/).filter(w => w.length > 4));
+            const intersection = [...newWords].filter(w => oldWords.has(w)).length;
+            const similarity = newWords.size > 0 ? intersection / newWords.size : 0;
+            if (similarity > maxSimilarity) maxSimilarity = similarity;
+          }
+          if (maxSimilarity > 0.3) {
+            toast({
+              title: '⚠️ Duplicate Warning',
+              description: `This paper is ~${Math.round(maxSimilarity * 100)}% similar to a past paper for this subject. Consider regenerating.`,
+              variant: 'destructive',
+            });
+          }
+        }
+      } catch { /* non-blocking */ }
       
       // Format in Kalasalingam University official format
-      const paperContent = formatPaperContent({
-        subject: subjectName,
+      let paperContent = formatPaperContent({
+        subject: paperTitle.trim() || subjectName,
         totalMarks,
         generatedQuestions,
         courseCode: selectedSubject.course_code || '21ECE1400',
@@ -389,14 +435,30 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         examType: 'SESSIONAL EXAMINATION – II',
         examMonth: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase(),
         dateSession: new Date().toLocaleDateString('en-GB'),
-        useKalasalingamFormat: true, // Enable Kalasalingam format
-        parts: parts, // Pass user-configured parts
+        useKalasalingamFormat: true,
+        parts: parts,
         courseOutcomes: [
           { co: 'CO2', description: 'Analyze the optimal usage of concepts from the study material' },
           { co: 'CO3', description: 'Demonstrate the usage of principles for specific requirements' },
           { co: 'CO4', description: 'Analyze the methods and techniques for different applications' }
         ]
       });
+
+      // Inject watermark into paper HTML if selected
+      if (watermark !== 'none' && paperContent.includes('<body>')) {
+        const wmText = watermark === 'draft' ? 'DRAFT' : 'CONFIDENTIAL';
+        const wmStyle = `<style>
+          body::before {
+            content: '${wmText}';
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 80pt; font-weight: bold;
+            color: rgba(180,0,0,0.08); z-index: 0;
+            pointer-events: none; white-space: nowrap;
+          }
+        </style>`;
+        paperContent = paperContent.replace('</head>', wmStyle + '</head>');
+      }
 
       // Create the final paper object
       const newPaper: QuestionPaper = {
@@ -442,7 +504,7 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
         .insert({
           user_id: user?.id,
           subject_id: selectedSubjectId,
-          paper_title: `${selectedSubject.subject_name} Question Paper`,
+          paper_title: paperTitle.trim() || `${selectedSubject.subject_name} Question Paper`,
           exam_category: 'Regular',
           total_marks: totalMarks,
           total_questions: getTotalQuestions(),
@@ -688,6 +750,47 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
       {/* Always show the main configuration section */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
+
+          {/* ── Exam Templates ─────────────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center text-base">
+                <Bookmark className="w-4 h-4 mr-2" />Quick Exam Templates
+              </CardTitle>
+              <CardDescription>One-click presets for common exam types</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {EXAM_TEMPLATES.map(tpl => (
+                  <Button
+                    key={tpl.label}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      setParts(tpl.parts);
+                      setTotalMarks(tpl.totalMarks);
+                      toast({ title: `Template applied`, description: tpl.label });
+                    }}
+                  >
+                    {tpl.label}
+                  </Button>
+                ))}
+                {savedTemplates.map(tpl => (
+                  <Button
+                    key={tpl.name}
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => loadTemplate(tpl)}
+                  >
+                    ⭐ {tpl.name}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -803,6 +906,31 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
                     <span className="text-green-600 text-sm">🚀</span>
                     <span className="text-sm font-medium text-green-700 dark:text-green-400">NVIDIA AI (Llama 3.1 405B) — Auto with fallback</span>
                   </div>
+                </div>
+
+                {/* Watermark option */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1"><Stamp className="w-3 h-3" />Paper Watermark</Label>
+                  <Select value={watermark} onValueChange={(v: any) => setWatermark(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Watermark</SelectItem>
+                      <SelectItem value="draft">DRAFT</SelectItem>
+                      <SelectItem value="confidential">CONFIDENTIAL</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Feature 16: Custom Paper Title */}
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="paperTitle">Custom Paper Title (optional)</Label>
+                  <Input
+                    id="paperTitle"
+                    placeholder="e.g., Mid-Term Examination — Data Structures"
+                    value={paperTitle}
+                    onChange={e => setPaperTitle(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Leave blank to use the default subject name as title</p>
                 </div>
               </div>
 
@@ -1113,6 +1241,67 @@ export function QuestionPaperConfig({ papers, onNewPaperGenerated }: QuestionPap
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Bloom's Balance Indicator */}
+              {(() => {
+                const totalQ = parts.reduce((s, p) => s + p.questions, 0);
+                if (totalQ === 0) return null;
+                const easy = parts.filter(p => p.difficulty === 'easy').reduce((s, p) => s + p.questions, 0);
+                const medium = parts.filter(p => p.difficulty === 'medium').reduce((s, p) => s + p.questions, 0);
+                const hard = parts.filter(p => p.difficulty === 'hard').reduce((s, p) => s + p.questions, 0);
+                const easyPct = Math.round((easy / totalQ) * 100);
+                const medPct = Math.round((medium / totalQ) * 100);
+                const hardPct = Math.round((hard / totalQ) * 100);
+                const isUnbalanced = easyPct > 70;
+                return (
+                  <div className={`rounded-lg border p-3 space-y-2 ${isUnbalanced ? 'border-orange-300 bg-orange-50 dark:bg-orange-950/20' : 'border-green-300 bg-green-50 dark:bg-green-950/20'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold">{isUnbalanced ? '⚠️ Difficulty Imbalance' : '✅ Difficulty Balance'}</span>
+                      <span className="text-xs text-muted-foreground">{totalQ} total questions</span>
+                    </div>
+                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
+                      {easy > 0 && <div className="bg-green-400 transition-all" style={{ width: `${easyPct}%` }} title={`Easy: ${easyPct}%`} />}
+                      {medium > 0 && <div className="bg-yellow-400 transition-all" style={{ width: `${medPct}%` }} title={`Medium: ${medPct}%`} />}
+                      {hard > 0 && <div className="bg-red-400 transition-all" style={{ width: `${hardPct}%` }} title={`Hard: ${hardPct}%`} />}
+                    </div>
+                    <div className="flex gap-3 text-xs">
+                      {easy > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-400 inline-block" />Easy {easyPct}%</span>}
+                      {medium > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block" />Medium {medPct}%</span>}
+                      {hard > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Hard {hardPct}%</span>}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Paper Templates */}
+              <div className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold">📋 Paper Templates</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const name = prompt('Template name (e.g. "Sessional Exam"):');
+                      if (name?.trim()) saveTemplate(name.trim());
+                    }}
+                  >
+                    Save Current
+                  </Button>
+                </div>
+                {savedTemplates.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {savedTemplates.map(t => (
+                      <div key={t.name} className="flex items-center gap-1 bg-muted rounded px-2 py-1 text-xs">
+                        <button onClick={() => loadTemplate(t)} className="hover:text-primary font-medium">{t.name}</button>
+                        <button onClick={() => deleteTemplate(t.name)} className="text-muted-foreground hover:text-destructive ml-1">×</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No templates saved yet. Configure parts and click "Save Current".</p>
+                )}
+              </div>
 
               {/* Enhanced validation for Generate button */}
               {(() => {

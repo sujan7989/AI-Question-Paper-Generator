@@ -7,24 +7,27 @@ import { QuestionPaperConfig } from '@/components/QuestionPaperConfig';
 import { UserManagement } from '@/components/UserManagement';
 import { Analytics } from '@/components/Analytics';
 import { ProfilePage } from '@/components/ProfilePage';
+import { QuestionBank } from '@/components/QuestionBank';
+import { NotificationBell } from '@/components/NotificationBell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import {
   BookOpen, FileText, Users, LogOut, PlusCircle, CheckCircle,
   GraduationCap, Book, Download, Home, FilePlus, BarChart,
-  Trash2, Eye, Search, Menu, X, UserCircle,
+  Trash2, Eye, Search, Menu, X, UserCircle, Database,
+  ChevronUp, ChevronDown, Settings,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { downloadPaperAsPDF } from "@/lib/paper";
 import { QuestionPaperPreview } from "@/components/QuestionPaperPreview";
 import { useToast } from "@/hooks/use-toast";
-import { Toaster } from "@/components/ui/toaster";
 
-type DashboardView = 'overview' | 'subjects' | 'configure' | 'users' | 'analytics' | 'profile';
+type DashboardView = 'overview' | 'subjects' | 'configure' | 'users' | 'analytics' | 'profile' | 'bank';
 
 // Confetti burst helper
 function launchConfetti() {
@@ -71,12 +74,29 @@ export function Dashboard() {
   const [selectedPapers, setSelectedPapers] = useState<number[]>([]);
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [paperSearch, setPaperSearch] = useState('');
+  const [paperDateFilter, setPaperDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [subjectSearch, setSubjectSearch] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [confettiFired, setConfettiFired] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [users, setUsers] = useState<any[]>([]);
+
+  // Feature 20: Widget order customization
+  const DEFAULT_WIDGET_ORDER = ['subjects', 'papers', 'team', 'avg'];
+  const [widgetOrder, setWidgetOrder] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('dashboard_widget_order') || 'null') || DEFAULT_WIDGET_ORDER; } catch { return DEFAULT_WIDGET_ORDER; }
+  });
+  const [customizeMode, setCustomizeMode] = useState(false);
+
+  const moveWidget = (idx: number, dir: -1 | 1) => {
+    const newOrder = [...widgetOrder];
+    const target = idx + dir;
+    if (target < 0 || target >= newOrder.length) return;
+    [newOrder[idx], newOrder[target]] = [newOrder[target], newOrder[idx]];
+    setWidgetOrder(newOrder);
+    localStorage.setItem('dashboard_widget_order', JSON.stringify(newOrder));
+  };
 
   const navigateTo = useCallback((view: DashboardView) => {
     setCurrentView(view);
@@ -134,9 +154,17 @@ export function Dashboard() {
     ? Math.min(100, Math.round((questionPapers.length / Math.max(subjects.length, 1)) * 100))
     : 0;
 
-  const filteredPapers = questionPapers.filter(p =>
-    p.subjectName.toLowerCase().includes(paperSearch.toLowerCase())
-  );
+  const filteredPapers = questionPapers.filter(p => {
+    const matchesSearch = p.subjectName.toLowerCase().includes(paperSearch.toLowerCase());
+    if (!matchesSearch) return false;
+    if (paperDateFilter === 'all') return true;
+    const now = new Date();
+    const paperDate = new Date(p.generatedAt);
+    if (paperDateFilter === 'today') return paperDate.toDateString() === now.toDateString();
+    if (paperDateFilter === 'week') return (now.getTime() - paperDate.getTime()) < 7 * 24 * 60 * 60 * 1000;
+    if (paperDateFilter === 'month') return (now.getTime() - paperDate.getTime()) < 30 * 24 * 60 * 60 * 1000;
+    return true;
+  });
   const filteredSubjects = subjects.filter(s =>
     s.subject_name.toLowerCase().includes(subjectSearch.toLowerCase()) ||
     (s.course_code || '').toLowerCase().includes(subjectSearch.toLowerCase())
@@ -223,6 +251,7 @@ export function Dashboard() {
     { name: 'Dashboard', icon: Home, view: 'overview' },
     { name: 'Subject Setup', icon: BookOpen, view: 'subjects' },
     { name: 'Generate Papers', icon: FilePlus, view: 'configure' },
+    { name: 'Question Bank', icon: Database, view: 'bank' },
     { name: 'Analytics', icon: BarChart, view: 'analytics' },
     ...(profile?.role === 'admin' ? [{ name: 'User Management', icon: Users, view: 'users' }] : []),
   ];
@@ -244,6 +273,8 @@ export function Dashboard() {
         return profile?.role === 'admin' ? <div key={viewKey} className="view-enter"><UserManagement /></div> : null;
       case 'analytics':
         return <div key={viewKey} className="view-enter"><Analytics /></div>;
+      case 'bank':
+        return <div key={viewKey} className="view-enter"><QuestionBank /></div>;
       case 'profile':
         return <div key={viewKey} className="view-enter"><ProfilePage /></div>;
       default:
@@ -253,7 +284,7 @@ export function Dashboard() {
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h2 className="text-3xl font-bold tracking-tight">
-                  Welcome, {profile?.first_name} {profile?.last_name}
+                  Welcome, {profile?.first_name ?? ''} {profile?.last_name ?? ''}
                 </h2>
                 <p className="text-muted-foreground">AI-powered question paper generation system</p>
               </div>
@@ -267,55 +298,134 @@ export function Dashboard() {
 
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {subjectsLoading ? <SkeletonCard /> : (
-                <Card className="cursor-pointer hover:bg-accent/50 transition-all duration-200 btn-micro" onClick={() => setShowSubjectsDialog(true)}>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Active Subjects</CardTitle>
-                    <Book className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{subjects.length}</div>
-                    <p className="text-xs text-muted-foreground">Click to view all subjects</p>
-                  </CardContent>
-                </Card>
-              )}
-              {papersLoading ? <SkeletonCard /> : (
-                <Card className="cursor-pointer hover:bg-accent/50 transition-all duration-200 btn-micro" onClick={() => setShowPapersDialog(true)}>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Papers Generated</CardTitle>
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{questionPapers.length}</div>
-                    <p className="text-xs text-muted-foreground">Click to view all papers</p>
-                  </CardContent>
-                </Card>
-              )}
-              {profile?.role === 'admin' && (
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Team Members</CardTitle>
-                    <Users className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{users.length}</div>
-                    <p className="text-xs text-muted-foreground">Active users in system</p>
-                  </CardContent>
-                </Card>
-              )}
+              {/* Feature 20: Customizable widget order */}
+              <div className="col-span-full flex justify-end">
+                <Button variant="ghost" size="sm" onClick={() => setCustomizeMode(m => !m)} className="text-xs">
+                  <Settings className="w-3 h-3 mr-1" />{customizeMode ? 'Done Customizing' : 'Customize Order'}
+                </Button>
+              </div>
+              {widgetOrder.map((widgetId, idx) => {
+                const moveUp = () => moveWidget(idx, -1);
+                const moveDown = () => moveWidget(idx, 1);
+                const controls = customizeMode ? (
+                  <div className="flex flex-col gap-0.5 ml-1">
+                    <button onClick={moveUp} disabled={idx === 0} className="p-0.5 hover:bg-muted rounded disabled:opacity-30"><ChevronUp className="w-3 h-3" /></button>
+                    <button onClick={moveDown} disabled={idx === widgetOrder.length - 1} className="p-0.5 hover:bg-muted rounded disabled:opacity-30"><ChevronDown className="w-3 h-3" /></button>
+                  </div>
+                ) : null;
+
+                if (widgetId === 'subjects') return (
+                  <div key="subjects" className="flex items-stretch gap-1">
+                    {subjectsLoading ? <SkeletonCard /> : (
+                      <Card className="flex-1 cursor-pointer hover:bg-accent/50 transition-all duration-200 btn-micro" onClick={() => setShowSubjectsDialog(true)}>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium">Active Subjects</CardTitle>
+                          <Book className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold">{subjects.length}</div>
+                          <p className="text-xs text-muted-foreground">Click to view all subjects</p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {controls}
+                  </div>
+                );
+                if (widgetId === 'papers') return (
+                  <div key="papers" className="flex items-stretch gap-1">
+                    {papersLoading ? <SkeletonCard /> : (
+                      <Card className="flex-1 cursor-pointer hover:bg-accent/50 transition-all duration-200 btn-micro" onClick={() => setShowPapersDialog(true)}>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                          <CardTitle className="text-sm font-medium">Papers Generated</CardTitle>
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-2xl font-bold">{questionPapers.length}</div>
+                          <p className="text-xs text-muted-foreground">Click to view all papers</p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {controls}
+                  </div>
+                );
+                if (widgetId === 'team') return profile?.role === 'admin' ? (
+                  <div key="team" className="flex items-stretch gap-1">
+                    <Card className="flex-1">
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Team Members</CardTitle>
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">{users.length}</div>
+                        <p className="text-xs text-muted-foreground">Active users in system</p>
+                      </CardContent>
+                    </Card>
+                    {controls}
+                  </div>
+                ) : null;
+                if (widgetId === 'avg') return (
+                  <div key="avg" className="flex items-stretch gap-1">
+                    <Card className="flex-1">
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Papers per Subject</CardTitle>
+                        <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">
+                          {subjects.length > 0 ? (questionPapers.length / subjects.length).toFixed(1) : '0'}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Average papers per subject</p>
+                      </CardContent>
+                    </Card>
+                    {controls}
+                  </div>
+                );
+                return null;
+              })}
+            </div>
+
+            {/* Admin Staff Overview — visible only to admin, great for HOD demo */}
+            {profile?.role === 'admin' && users.length > 0 && (
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Papers per Subject</CardTitle>
-                  <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Users className="w-4 h-4" />Staff Overview
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {subjects.length > 0 ? (questionPapers.length / subjects.length).toFixed(1) : '0'}
+                  <div className="space-y-2">
+                    {users.filter((u: any) => u.role === 'staff').slice(0, 5).map((u: any) => {
+                      const staffPapers = questionPapers.filter((p: any) => p.user_id === u.user_id || p.generatedBy === u.email);
+                      return (
+                        <div key={u.user_id} className="flex items-center justify-between p-2 rounded-lg bg-muted/40 hover:bg-muted/70 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0">
+                              {(u.first_name?.[0] || '?').toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{u.first_name} {u.last_name}</p>
+                              <p className="text-xs text-muted-foreground truncate">{u.subject_handled || u.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-xs text-muted-foreground">{staffPapers.length} papers</span>
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${staffPapers.length > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {staffPapers.length > 0 ? 'Active' : 'No papers'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {users.filter((u: any) => u.role === 'staff').length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-3">No staff members yet</p>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">Average papers per subject</p>
+                  {users.filter((u: any) => u.role === 'staff').length > 5 && (
+                    <p className="text-xs text-muted-foreground mt-2 text-center">+{users.filter((u: any) => u.role === 'staff').length - 5} more — view in Analytics</p>
+                  )}
                 </CardContent>
               </Card>
-            </div>
+            )}
 
             {/* Subjects Dialog */}
             <Dialog open={showSubjectsDialog} onOpenChange={setShowSubjectsDialog}>
@@ -395,10 +505,23 @@ export function Dashboard() {
                     )}
                   </DialogTitle>
                 </DialogHeader>
-                {/* Search */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search papers by subject..." className="pl-9" value={paperSearch} onChange={e => setPaperSearch(e.target.value)} />
+                {/* Search + Date Filter */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search papers by subject..." className="pl-9" value={paperSearch} onChange={e => setPaperSearch(e.target.value)} />
+                  </div>
+                  <Select value={paperDateFilter} onValueChange={(v: any) => setPaperDateFilter(v)}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This week</SelectItem>
+                      <SelectItem value="month">This month</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="max-h-[55vh] overflow-y-auto space-y-3 p-1">
                   {filteredPapers.length > 0 ? filteredPapers.map(paper => (
@@ -525,6 +648,40 @@ export function Dashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Activity Feed */}
+            {questionPapers.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-500" />Recent Activity
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {questionPapers.slice(0, 8).map((paper: any, i: number) => (
+                      <div key={paper.id} className="flex items-center gap-3 text-sm">
+                        <div className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                        <span className="text-muted-foreground text-xs shrink-0">
+                          {new Date(paper.generatedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </span>
+                        <span className="truncate">Paper generated for <span className="font-medium">{paper.subjectName}</span></span>
+                        <span className="text-xs text-muted-foreground shrink-0">{paper.config?.totalMarks}M</span>
+                      </div>
+                    ))}
+                    {subjects.slice(0, 3).map((s: any) => (
+                      <div key={s.id} className="flex items-center gap-3 text-sm">
+                        <div className="h-2 w-2 rounded-full bg-blue-400 shrink-0" />
+                        <span className="text-muted-foreground text-xs shrink-0">
+                          {new Date(s.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </span>
+                        <span className="truncate">Subject added: <span className="font-medium">{s.subject_name}</span></span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         );
     }
@@ -532,48 +689,55 @@ export function Dashboard() {
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur px-4 sm:px-6">
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/95 backdrop-blur px-4 sm:px-6">
         <div className="flex items-center gap-2 shrink-0">
           <GraduationCap className="h-6 w-6 text-primary" />
-          <span className="text-lg font-bold hidden sm:block">QuestionCraft AI</span>
+          <span className="text-lg font-bold hidden lg:block">QuestionCraft AI</span>
         </div>
 
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center space-x-1">
+        {/* Desktop nav — scrollable so it never pushes logout off screen */}
+        <nav className="hidden md:flex items-center gap-0.5 overflow-x-auto flex-1 min-w-0 scrollbar-none">
           {navigationItems.map(item => (
             <Button
               key={item.name}
               variant={currentView === item.view ? 'default' : 'ghost'}
               onClick={() => navigateTo(item.view as DashboardView)}
-              className="flex items-center gap-2 btn-micro"
+              className="flex items-center gap-1.5 btn-micro shrink-0 px-2.5"
               size="sm"
             >
-              <item.icon className="w-4 h-4" />
-              {item.name}
+              <item.icon className="w-4 h-4 shrink-0" />
+              <span className="hidden lg:block text-xs">{item.name}</span>
             </Button>
           ))}
         </nav>
 
-        <div className="ml-auto flex items-center space-x-2">
+        {/* Right side — always shrink-0 so it never gets pushed off */}
+        <div className="ml-auto flex items-center gap-1 shrink-0">
           <ThemeToggle />
+          {/* Feature 9: Notification Bell */}
+          <NotificationBell />
+          {/* Role badge */}
+          <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold shrink-0 ${profile?.role === 'admin' ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-blue-100 text-blue-700 border border-blue-300'}`}>
+            {profile?.role === 'admin' ? '🔑 Admin' : '👤 Staff'}
+          </span>
           {/* Profile avatar button */}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigateTo('profile')}
-            className="btn-micro hidden sm:flex items-center gap-2"
+            className="btn-micro hidden sm:flex items-center gap-1.5 shrink-0 px-2"
             title="My Profile"
           >
-            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">
+            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0">
               {(profile?.first_name?.[0] || '?').toUpperCase()}
             </div>
-            <span className="hidden lg:block text-sm">{profile?.first_name}</span>
+            <span className="hidden xl:block text-sm">{profile?.first_name}</span>
           </Button>
-          <Button variant="ghost" size="sm" onClick={signOut} className="btn-micro hidden sm:flex">
-            <LogOut className="h-4 w-4 mr-2" />Logout
+          <Button variant="ghost" size="sm" onClick={signOut} className="btn-micro hidden sm:flex shrink-0 px-2">
+            <LogOut className="h-4 w-4 mr-1" /><span className="hidden lg:block">Logout</span>
           </Button>
           {/* Mobile hamburger */}
-          <Button variant="ghost" size="sm" className="md:hidden" onClick={() => setMobileNavOpen(o => !o)}>
+          <Button variant="ghost" size="sm" className="md:hidden shrink-0" onClick={() => setMobileNavOpen(o => !o)}>
             {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
@@ -626,8 +790,6 @@ export function Dashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Toaster />
     </div>
   );
 }

@@ -1,11 +1,13 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Download, FileText, ExternalLink, Key, FileDown, BarChart2, Sparkles, Pencil, Check, X, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, FileText, ExternalLink, Key, FileDown, BarChart2, Sparkles, Pencil, Check, X, RefreshCw, BookMarked, Link, ChevronDown, History } from 'lucide-react';
 import { downloadPaperAsPDF, generateAnswerKeyHTML, exportPaperAsWord, type QuestionPaper, type KalasalingamQuestion } from '@/lib/paper';
 import { useEffect, useRef, useState } from 'react';
 import { type ApiProvider } from '@/lib/ai';
 import { useToast } from '@/hooks/use-toast';
 import { type EvaluationReport } from '@/lib/evaluator';
+import { saveQuestionToBank } from '@/components/QuestionBank';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 interface QuestionPaperPreviewProps {
   paper: QuestionPaper;
@@ -47,6 +49,13 @@ const confidenceColors: Record<string, string> = {
   Medium: 'bg-yellow-100 text-yellow-700',
   Low: 'bg-red-100 text-red-700',
 };
+
+// Feature 13: Auto-tag difficulty based on Bloom's level
+function getDifficultyTag(bloom: string): { label: string; className: string } {
+  if (['Remember', 'Understand'].includes(bloom)) return { label: 'Easy', className: 'bg-green-100 text-green-700' };
+  if (['Apply', 'Analyze'].includes(bloom)) return { label: 'Medium', className: 'bg-yellow-100 text-yellow-700' };
+  return { label: 'Hard', className: 'bg-red-100 text-red-700' };
+}
 
 /**
  * Rebuild the paper HTML by replacing question text in the existing HTML.
@@ -242,6 +251,19 @@ export function QuestionPaperPreview({ paper, onBack, apiProvider = 'nvidia', ev
   const [editedQuestions, setEditedQuestions] = useState<KalasalingamQuestion[]>([]);
   const [currentPaperHTML, setCurrentPaperHTML] = useState(paper?.content || '');
 
+  // Version history — snapshot before every regeneration so user can restore
+  type Snapshot = { label: string; questions: KalasalingamQuestion[]; timestamp: string };
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const saveSnapshot = (label: string, questions: KalasalingamQuestion[]) => {
+    if (questions.length === 0) return;
+    setSnapshots(prev => [
+      { label, questions: [...questions], timestamp: new Date().toLocaleTimeString() },
+      ...prev.slice(0, 9), // keep last 10 snapshots
+    ]);
+  };
+
   const { toast } = useToast();
 
   const parsedQuestions = parseQuestionsForStats(paper?.questions[0]?.question || '');
@@ -351,7 +373,7 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
         }),
       });
 
-      let answers: Record<number, string> = {};
+      const answers: Record<number, string> = {};
 
       if (response.ok) {
         const data = await response.json();
@@ -376,6 +398,165 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
   const openInNewWindow = () => {
     const w = window.open('', '_blank', 'width=900,height=1200');
     if (w) { w.document.write(currentPaperHTML); w.document.close(); }
+  };
+
+  // Feature 18: Copy shareable link
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/?paper=${paper.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      toast({ title: 'Link copied!', description: 'Shareable paper link copied to clipboard.' });
+    }).catch(() => {
+      toast({ title: 'Copy failed', description: 'Could not copy to clipboard.', variant: 'destructive' });
+    });
+  };
+
+  // Feature 17: Regenerate a specific part
+  const [regeneratingPart, setRegeneratingPart] = useState<string | null>(null);
+  const handleRegeneratePart = async (partName: string) => {
+    setRegeneratingPart(partName);
+    try {
+      // Find which questions belong to this part
+      const partConfig = paper.config.parts?.find(p => p.name === partName);
+      if (!partConfig) {
+        toast({ title: 'Part not found', variant: 'destructive' });
+        return;
+      }
+
+      // Figure out start/end index for this part in editedQuestions
+      let startIdx = 0;
+      for (const p of paper.config.parts || []) {
+        if (p.name === partName) break;
+        startIdx += p.choicesEnabled ? Math.ceil(p.questions * 1.5) : p.questions;
+      }
+      const count = partConfig.choicesEnabled
+        ? Math.ceil(partConfig.questions * 1.5)
+        : partConfig.questions;
+      const endIdx = startIdx + count;
+
+      // Get existing questions for context
+      const existingForPart = editedQuestions.slice(startIdx, endIdx);
+      const existingText = existingForPart.map(q => `Q${q.number}. ${q.question} | ${q.pattern} | CO${q.mappingCO}`).join('\n');
+
+      const prompt = `You are a university exam question writer for subject "${paper.subjectName}".
+
+Regenerate EXACTLY ${count} NEW questions for ${partName} (${partConfig.marks} marks, ${partConfig.marksPerQuestion} marks each, difficulty: ${(partConfig as any).difficulty || 'medium'}).
+
+Current questions (replace ALL of these with completely new ones):
+${existingText}
+
+STRICT FORMAT — every line must look exactly like this:
+Q${startIdx + 1}. question text | Bloom | CO2
+
+Rules:
+- Bloom must be one of: Remember, Understand, Apply, Analyze, Evaluate, Create
+- CO must be CO2, CO3, or CO4
+- Number questions starting from Q${startIdx + 1} to Q${endIdx}
+- Generate EXACTLY ${count} questions, no more, no less
+- Do NOT repeat any existing questions above
+
+Generate Q${startIdx + 1} to Q${endIdx} now:`;
+
+      const response = await fetch(`${window.location.origin}/api/groq`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: 'You are a university professor writing exam questions. Output ONLY questions in the exact format requested. No extra text.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 1500,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const raw: string = data.choices?.[0]?.message?.content || '';
+
+        if (raw.trim().length < 20) {
+          toast({ title: 'No questions returned', description: 'AI returned empty response. Try again.', variant: 'destructive' });
+          return;
+        }
+
+        // Parse the new questions
+        const newLines = raw.split('\n').filter(l => l.trim());
+        const newQuestions: typeof editedQuestions = [];
+
+        for (const line of newLines) {
+          const m = line.match(/^Q?(\d+)[\.\)]\s*(.+?)\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?(\d+)/i);
+          if (m) {
+            newQuestions.push({
+              number: parseInt(m[1]),
+              question: m[2].trim(),
+              pattern: m[3] as any,
+              mappingCO: Math.min(4, Math.max(2, parseInt(m[4]))),
+              marks: partConfig.marksPerQuestion,
+            });
+          }
+        }
+
+        if (newQuestions.length === 0) {
+          toast({ title: 'Parse failed', description: 'Could not read AI response. Try again.', variant: 'destructive' });
+          return;
+        }
+
+        // Pad or trim to exact count needed
+        while (newQuestions.length < count) {
+          const last = newQuestions[newQuestions.length - 1];
+          newQuestions.push({ ...last, number: last.number + 1, question: `${last.question} (variant)` });
+        }
+        const trimmed = newQuestions.slice(0, count);
+
+        // Re-number to match position in full paper
+        const renumbered = trimmed.map((q, i) => ({ ...q, number: startIdx + i + 1 }));
+
+        // Splice into editedQuestions — save snapshot first
+        saveSnapshot(`Before ${partName} regen`, editedQuestions);
+        const updated = [...editedQuestions];
+        updated.splice(startIdx, count, ...renumbered);
+        setEditedQuestions(updated);
+
+        toast({ title: `${partName} regenerated ✓`, description: `${renumbered.length} new questions generated.` });
+      } else {
+        // Fallback to NVIDIA if Groq fails
+        const nvRes = await fetch(`${window.location.origin}/api/nvidia`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'meta/llama-3.1-8b-instruct',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.7,
+            max_tokens: 1000,
+          }),
+        });
+        if (nvRes.ok) {
+          const nvData = await nvRes.json();
+          const raw: string = nvData.choices?.[0]?.message?.content || '';
+          const newLines = raw.split('\n').filter(l => l.trim());
+          const newQuestions: typeof editedQuestions = [];
+          for (const line of newLines) {
+            const m = line.match(/^Q?(\d+)[\.\)]\s*(.+?)\s*\|\s*(Remember|Understand|Apply|Analyze|Evaluate|Create)\s*\|\s*(?:CO)?(\d+)/i);
+            if (m) newQuestions.push({ number: parseInt(m[1]), question: m[2].trim(), pattern: m[3] as any, mappingCO: Math.min(4, Math.max(2, parseInt(m[4]))), marks: partConfig.marksPerQuestion });
+          }
+          if (newQuestions.length > 0) {
+            while (newQuestions.length < count) { const last = newQuestions[newQuestions.length - 1]; newQuestions.push({ ...last, number: last.number + 1 }); }
+            const renumbered = newQuestions.slice(0, count).map((q, i) => ({ ...q, number: startIdx + i + 1 }));
+            saveSnapshot(`Before ${partName} regen (fallback)`, editedQuestions);
+            const updated = [...editedQuestions];
+            updated.splice(startIdx, count, ...renumbered);
+            setEditedQuestions(updated);
+            toast({ title: `${partName} regenerated ✓`, description: `${renumbered.length} new questions generated.` });
+            return;
+          }
+        }
+        toast({ title: 'Regeneration failed', description: 'Both AI providers failed. Try again.', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Regeneration failed', description: 'Network error. Try again.', variant: 'destructive' });
+    } finally {
+      setRegeneratingPart(null);
+    }
   };
 
   // Save inline edit
@@ -407,6 +588,7 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
       if (response.ok) {
         const data = await response.json();
         const newQ = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+        saveSnapshot(`Before Q${q.number} regen`, editedQuestions);
         const updated = [...editedQuestions];
         updated[idx] = { ...updated[idx], question: newQ };
         setEditedQuestions(updated);
@@ -459,12 +641,81 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
             <Key className="w-4 h-4 mr-2" />
             {answerKeyLoading ? 'Generating Answers...' : showAnswerKey ? 'Hide Answer Key' : 'Answer Key'}
           </Button>
+          {/* Feature 18: Copy Link */}
+          <Button variant="outline" onClick={handleCopyLink}>
+            <Link className="w-4 h-4 mr-2" />Copy Link
+          </Button>
+          {/* Version History */}
+          {snapshots.length > 0 && (
+            <Button variant={showHistory ? 'secondary' : 'outline'} onClick={() => setShowHistory(s => !s)}>
+              <History className="w-4 h-4 mr-2" />
+              History ({snapshots.length})
+            </Button>
+          )}
+          {/* Feature 17: Regenerate Part */}
+          {paper.config.parts && paper.config.parts.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!!regeneratingPart}>
+                  <RefreshCw className={`w-4 h-4 mr-2 ${regeneratingPart ? 'animate-spin' : ''}`} />
+                  {regeneratingPart ? `Regenerating ${regeneratingPart}...` : 'Regenerate Part'}
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {paper.config.parts.map(part => (
+                  <DropdownMenuItem key={part.name} onClick={() => handleRegeneratePart(part.name)}>
+                    Regenerate {part.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
       <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-700 dark:text-blue-300">
         Tip: Click "Open in New Window" for the best print experience.
       </div>
+
+      {/* Version History Panel */}
+      {showHistory && snapshots.length > 0 && (
+        <div className="border rounded-lg p-4 bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold flex items-center gap-2">
+              <History className="w-4 h-4 text-amber-600" />
+              Version History
+              <span className="text-xs text-muted-foreground font-normal">— restore any previous version of your questions</span>
+            </h4>
+            <Button size="sm" variant="ghost" onClick={() => setShowHistory(false)}>
+              <X className="w-3 h-3" />
+            </Button>
+          </div>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {snapshots.map((snap, i) => (
+              <div key={i} className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg border px-3 py-2 text-sm">
+                <div>
+                  <span className="font-medium">{snap.label}</span>
+                  <span className="text-xs text-muted-foreground ml-2">at {snap.timestamp}</span>
+                  <span className="text-xs text-muted-foreground ml-2">· {snap.questions.length} questions</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs h-7"
+                  onClick={() => {
+                    saveSnapshot('Before restore', editedQuestions);
+                    setEditedQuestions([...snap.questions]);
+                    toast({ title: 'Version restored', description: `Restored to: ${snap.label}` });
+                  }}
+                >
+                  Restore
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Panel */}
       {showStats && parsedQuestions.length > 0 && (
@@ -597,6 +848,8 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
                       <div className="flex gap-1 mt-1 flex-wrap">
                         <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${bloomColors[q.pattern] || 'bg-gray-100 text-gray-700'}`}>{q.pattern}</span>
                         <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">CO{q.mappingCO}</span>
+                        {/* Feature 13: Difficulty auto-tag */}
+                        {(() => { const d = getDifficultyTag(q.pattern); return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${d.className}`}>{d.label}</span>; })()}
                       </div>
                     </div>
                     <div className="flex gap-1 shrink-0">
@@ -617,6 +870,22 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
                       >
                         <RefreshCw className={`w-3 h-3 ${regeneratingIdx === idx ? 'animate-spin' : ''}`} />
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Save to Question Bank"
+                        onClick={() => {
+                          const saved = saveQuestionToBank({
+                            question: q.question,
+                            bloom: q.pattern,
+                            co: `CO${q.mappingCO}`,
+                            subject: paper.subjectName,
+                          });
+                          toast({ title: saved ? 'Saved to Question Bank' : 'Already in bank' });
+                        }}
+                      >
+                        <BookMarked className="w-3 h-3 text-blue-500" />
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -626,9 +895,11 @@ Q2_ANSWER: • 1. Heading: sub-point, sub-point • 2. Heading: sub-point • [D
         </div>
       )}
 
-      {/* Question Paper iframe */}
-      <div className="border-2 border-gray-300 rounded-lg overflow-auto bg-white shadow-lg">
-        <iframe ref={iframeRef} title="Question Paper Preview" className="w-full" style={{ border: 'none', minHeight: '800px', display: 'block' }} />
+      {/* Question Paper iframe — responsive wrapper with horizontal scroll on mobile */}
+      <div className="border-2 border-gray-300 rounded-lg bg-white shadow-lg overflow-x-auto">
+        <div style={{ minWidth: '600px' }}>
+          <iframe ref={iframeRef} title="Question Paper Preview" className="w-full" style={{ border: 'none', minHeight: '800px', display: 'block' }} />
+        </div>
       </div>
 
       {/* Answer Key */}

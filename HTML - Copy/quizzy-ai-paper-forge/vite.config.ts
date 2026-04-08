@@ -45,11 +45,41 @@ export default defineConfig(({ mode }) => ({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'supabase': ['@supabase/supabase-js'],
-          'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-tabs', '@radix-ui/react-toast', 'lucide-react'],
-          'query': ['@tanstack/react-query'],
+        manualChunks(id) {
+          // Core React
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router-dom/')) {
+            return 'react-vendor';
+          }
+          // Supabase
+          if (id.includes('node_modules/@supabase/')) {
+            return 'supabase';
+          }
+          // Radix UI + lucide
+          if (id.includes('node_modules/@radix-ui/') || id.includes('node_modules/lucide-react/')) {
+            return 'ui-vendor';
+          }
+          // React Query
+          if (id.includes('node_modules/@tanstack/')) {
+            return 'query';
+          }
+          // PDF processing — large, lazy load
+          if (id.includes('node_modules/pdfjs-dist/') || id.includes('node_modules/pdf-parse/')) {
+            return 'pdf-vendor';
+          }
+          // Recharts
+          if (id.includes('node_modules/recharts/') || id.includes('node_modules/d3-')) {
+            return 'charts-vendor';
+          }
+          // Heavy app components — split into separate chunk
+          if (id.includes('src/components/Analytics') || id.includes('src/components/UserManagement')) {
+            return 'admin-chunk';
+          }
+          if (id.includes('src/components/QuestionPaperPreview') || id.includes('src/components/PaperComparison')) {
+            return 'preview-chunk';
+          }
+          if (id.includes('src/lib/paper') || id.includes('src/lib/ai') || id.includes('src/lib/subject-manager')) {
+            return 'core-lib';
+          }
         },
       },
     },

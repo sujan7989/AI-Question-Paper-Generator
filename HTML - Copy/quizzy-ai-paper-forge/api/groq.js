@@ -1,4 +1,5 @@
-// Vercel serverless function - proxies OpenRouter API
+// Vercel serverless function - proxies Groq API
+// Groq: fastest inference, free tier, 14400 req/day, handles long outputs
 import { setCors } from './_cors.js';
 
 export default async function handler(req, res) {
@@ -6,17 +7,15 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.VITE_OPENROUTER_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'OpenRouter API key not configured' });
+  const apiKey = process.env.VITE_GROQ_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Groq API key not configured' });
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://quizzy-ai-paper-forge.vercel.app',
-        'X-Title': 'QuestionCraft AI'
       },
       body: JSON.stringify(req.body),
     });

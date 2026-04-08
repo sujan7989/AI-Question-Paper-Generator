@@ -19,6 +19,8 @@ import {
   Trash2,
   Eye,
   RefreshCw,
+  Download,
+  Flame,
 } from 'lucide-react';
 
 export function Analytics() {
@@ -438,6 +440,128 @@ export function Analytics() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Staff Activity Report — Admin only */}
+      {profile?.role === 'admin' && activeUsers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Staff Activity Report
+            </CardTitle>
+            <CardDescription>Papers generated per staff member</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {activeUsers
+                .filter(u => u.role === 'staff')
+                .map(staffUser => {
+                  const staffPapers = generatedPapers.filter(p => p.user_id === staffUser.user_id);
+                  const staffSubjects = subjects.filter(s => s.user_id === staffUser.user_id);
+                  const lastPaper = staffPapers.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                  return (
+                    <div key={staffUser.user_id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold shrink-0">
+                          {(staffUser.first_name?.[0] || '?').toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{staffUser.first_name} {staffUser.last_name}</p>
+                          <p className="text-xs text-muted-foreground">{staffUser.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="text-center">
+                          <p className="font-bold text-lg">{staffPapers.length}</p>
+                          <p className="text-xs text-muted-foreground">Papers</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="font-bold text-lg">{staffSubjects.length}</p>
+                          <p className="text-xs text-muted-foreground">Subjects</p>
+                        </div>
+                        <div className="text-center hidden sm:block">
+                          <p className="text-xs font-medium">{lastPaper ? new Date(lastPaper.created_at).toLocaleDateString() : 'No activity'}</p>
+                          <p className="text-xs text-muted-foreground">Last paper</p>
+                        </div>
+                        <Badge variant={staffPapers.length > 0 ? 'default' : 'secondary'} className={staffPapers.length > 0 ? 'bg-green-500' : ''}>
+                          {staffPapers.length > 0 ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              {activeUsers.filter(u => u.role === 'staff').length === 0 && (
+                <p className="text-center text-muted-foreground text-sm py-4">No staff members found</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Feature 4: Paper Difficulty Heatmap */}
+      {generatedPapers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-500" />Paper Difficulty Heatmap
+            </CardTitle>
+            <CardDescription>Visual grid showing difficulty distribution across papers</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {generatedPapers.slice(0, 30).map((paper, i) => {
+                const diff = paper.paper_config?.difficulty || 'medium';
+                const colors: Record<string, string> = { easy: 'bg-green-400', medium: 'bg-yellow-400', hard: 'bg-red-500' };
+                const subj = subjects.find(s => s.id === paper.subject_id);
+                return (
+                  <div
+                    key={paper.id}
+                    title={`${subj?.subject_name || 'Unknown'} — ${diff} — ${new Date(paper.created_at).toLocaleDateString()}`}
+                    className={`w-8 h-8 rounded ${colors[diff] || 'bg-gray-300'} cursor-pointer hover:opacity-80 transition-opacity flex items-center justify-center text-white text-xs font-bold`}
+                  >
+                    {i + 1}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-3 text-xs">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-400 inline-block" />Easy</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-400 inline-block" />Medium</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" />Hard</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Feature 8: Staff Performance Report PDF — Admin only */}
+      {profile?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="w-5 h-5" />Staff Performance Report
+            </CardTitle>
+            <CardDescription>Download monthly performance report as PDF</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const month = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                const staffRows = activeUsers.filter(u => u.role === 'staff').map(u => {
+                  const papers = generatedPapers.filter(p => p.user_id === u.user_id);
+                  const subs = subjects.filter(s => s.user_id === u.user_id);
+                  return `<tr><td>${u.first_name} ${u.last_name}</td><td>${u.email}</td><td>${subs.length}</td><td>${papers.length}</td><td>${papers.length > 0 ? 'Active' : 'Inactive'}</td></tr>`;
+                }).join('');
+                const html = `<!DOCTYPE html><html><head><title>Staff Report ${month}</title><style>body{font-family:Arial,sans-serif;margin:20mm;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #000;padding:8px;text-align:left;}th{background:#e8e8e8;}h1{text-align:center;}</style></head><body><h1>Staff Performance Report — ${month}</h1><table><tr><th>Name</th><th>Email</th><th>Subjects</th><th>Papers</th><th>Status</th></tr>${staffRows}</table><p style="margin-top:20px;font-size:10pt;color:#555;">Generated on ${new Date().toLocaleString()} by QuestionCraft AI</p></body></html>`;
+                const w = window.open('', '_blank');
+                if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+              }}
+            >
+              <Download className="w-4 h-4 mr-2" />Download Monthly Report (PDF)
+            </Button>
+          </CardContent>
+        </Card>
+      )}
       
       {/* Delete User Confirmation Dialog */}
       <AlertDialog open={!!userToDelete} onOpenChange={() => setUserToDelete(null)}>
